@@ -57,8 +57,13 @@ async function main () {
       await screenshot('statistics-' + viewport); report.pages.push({ page: 'statistics', viewport })
       await navigate('/nav/galaxy', 'Galaxy Map'); await waitFor(() => evaluate('document.querySelectorAll(\'[data-marker="destination"]\').length===3'))
       if (!await evaluate('Array.from(document.querySelectorAll(\'[data-marker]\')).every(e=>e.dataset.position.split(\',\').every(v=>Number(v)>=0&&Number(v)<=1))')) throw new Error('Route not framed')
-      await evaluate('Array.from(document.querySelectorAll(\'button\')).find(b=>b.textContent===\'Fit Galaxy\').click()'); await waitFor(() => evaluate('document.body.innerText.includes(\'Manual framing\')'))
-      await evaluate('Array.from(document.querySelectorAll(\'button\')).find(b=>b.textContent===\'Fit Route\').click()'); await waitFor(() => evaluate('document.body.innerText.includes(\'Automatic route framing\')')); await screenshot('galaxy-' + viewport); report.pages.push({ page: 'galaxy', viewport })
+      const markerPositions = 'JSON.stringify(Array.from(document.querySelectorAll("[data-marker=destination]")).map(e=>e.dataset.position))'
+      const fitted = await evaluate(markerPositions)
+      await evaluate('document.querySelector(\'[aria-label="Galaxy zoom out"]\').click()')
+      await waitFor(async () => await evaluate(markerPositions) !== fitted)
+      await evaluate('Array.from(document.querySelectorAll(".go-galaxy-sidebar button")).find(b=>b.textContent==="Fit Route").click()')
+      await waitFor(async () => await evaluate(markerPositions) === fitted)
+      await screenshot('galaxy-' + viewport); report.pages.push({ page: 'galaxy', viewport, zoomAndFitRestored: true })
     }
     await evaluate('document.querySelector(\'[aria-label="Owner settings"]\').click()'); await evaluate('(()=>{const d=document.querySelector(".go-data-providers");d.parentElement.open=true;d.open=true})()'); await waitFor(() => evaluate('document.querySelectorAll(\'.go-provider-card\').length===10'))
     if (!await evaluate('Array.from(document.querySelectorAll(\'.go-provider-card input[type="checkbox"]\')).every(e=>!e.checked)&&document.body.innerText.includes(\'application approval required\')&&(()=>{const card=Array.from(document.querySelectorAll(\'.go-provider-card\')).find(e=>e.querySelector(\'h3\')?.textContent.includes(\'FRONTIER\'));return !!card&&!card.textContent.includes(\'Frontier developer approval required\')&&Array.from(card.querySelectorAll(\'button\')).find(e=>e.textContent.includes(\'Connect in system browser\'))?.disabled})()')) throw new Error('Provider defaults/gates missing')

@@ -13,7 +13,7 @@ async function main () {
   const navigate = async (url, text) => { await c.call('Page.navigate', { url: origin + url }); await waitFor(() => evaluate(`location.origin===${JSON.stringify(origin)}&&location.pathname===${JSON.stringify(url)}&&(${pageTextReady(text)})`)); await evaluate('document.fonts.ready.then(()=>true)') }
   const screenshot = async name => { const r = await c.call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }); await fs.writeFile(path.join(output, name + '.png'), Buffer.from(r.data, 'base64')) }
   const geometry = async () => evaluate(`(()=>{
-    const rect=axes=>{const r=document.querySelector('.go-galaxy-'+axes+' svg').getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom}};
+    const rect=axes=>{const svg=document.querySelector('.go-galaxy-'+axes+'>svg'),r=svg.getBoundingClientRect(),v=svg.viewBox.baseVal;return {x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom,scaleX:r.width/v.width,scaleY:r.height/v.height}};
     const pixel=axes=>{const e=document.querySelector('[data-marker="current"][data-axes="'+axes+'"]'),r=rect(axes),p=e.dataset.position.split(',').map(Number);return {x:r.x+p[0]*r.width,y:r.y+p[1]*r.height}};
     return {main:rect('xz'),bottom:rect('xy'),right:rect('yz'),current:{main:pixel('xz'),bottom:pixel('xy'),right:pixel('yz')},width:innerWidth,height:innerHeight}
   })()`)
@@ -48,7 +48,10 @@ async function main () {
       await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
       const g = await geometry()
       const near = (a, b) => Math.abs(a - b) <= 2
-      if (!near(g.main.x, g.bottom.x) || !near(g.main.width, g.bottom.width) || !near(g.main.y, g.right.y) || !near(g.main.height, g.right.height) || g.bottom.height > g.main.height * 0.22 || g.right.width > g.main.width * 0.22 || g.bottom.y < g.main.bottom || g.right.x < g.main.right) throw Error('Incorrect thin projection geometry: ' + JSON.stringify(g))
+      if (!near(g.main.x, g.bottom.x) || !near(g.main.width, g.bottom.width) || !near(g.main.y, g.right.y) || !near(g.main.height, g.right.height) || g.bottom.y < g.main.bottom || g.right.x < g.main.right) throw Error('Incorrect aligned projection geometry: ' + JSON.stringify(g))
+      for (const plane of [g.main, g.bottom, g.right]) {
+        if (Math.abs(plane.scaleX - plane.scaleY) > Math.max(0.05, plane.scaleX * 0.015) || Math.abs(plane.scaleX - g.main.scaleX) > Math.max(0.05, g.main.scaleX * 0.015)) throw Error('Projection light-year scale distorted: ' + JSON.stringify(g))
+      }
       if (!near(g.current.main.x, g.current.bottom.x) || !near(g.current.main.y, g.current.right.y)) throw Error('Shared X/Z marker alignment is broken: ' + JSON.stringify(g))
       if (g.right.right > width + 2 || g.bottom.bottom > height + 2) throw Error('Galaxy projections leave the visible dashboard: ' + JSON.stringify(g))
       report.geometry.push({ name, ...g }); await screenshot('galaxy-' + name)

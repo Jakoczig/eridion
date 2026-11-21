@@ -18,9 +18,13 @@ FSD correction removes the route requirement, recognizes authoritative Status FS
 
 Focused controller tests initially failed for no-route/map policy and Go legacy-charge/episode continuity, then passed after correction. Remaining-leg context regression advances a 220-hop route to hop 210 and verifies every upcoming coordinate within the 192-point cap. Tests cover persisted independent settings, unselected viewers, unknown positions, hysteresis, asymmetric axis bounds, exact XYZ pixels/clipping, route overlays and queued resize after unmount.
 
-Local Windows: 170 JavaScript tests, 28 build/asset tests, full Go tests, Go vet, security/build lint, React static build/export, executable offline smoke and native React bootstrap/shutdown passed. G2G, G2O, G2P, G2Q, G3C and G3D browser checks passed in disposable synthetic profiles. Final Windows/Linux native, race/security and artifact results must be read from the exact-head PR evidence, not inferred from these local results.
+Initial local Windows batch: 170 JavaScript tests, 28 build/asset tests, full Go tests, Go vet, security/build lint, React static build/export, executable offline smoke and native React bootstrap/shutdown passed. G2G, G2O, G2P, G2Q, G3C and G3D browser checks passed in disposable synthetic profiles. A subsequent failing-then-passing regression covers disabled-density fallback (171 JavaScript tests in the final suite). Search inspection also survives FSD overlays. Final Windows/Linux native, race/security and artifact results must be read from the exact-head PR evidence, not inferred from these local results.
 
 [Before/after screenshots and measured layout](g3d-map-evidence). Prior G3C Galaxy screenshots and new G3D density/Local desktop/touch screenshots contain synthetic navigation. G3D Local response is explicitly injected synthetic UI evidence; it does not claim new live publisher validation or real-game acceptance. The unchanged signed spatial backend retains its existing verification regressions. A short 1.2s synthetic browser sample measured 3.41 MB JS heap and 1.54% main-thread busy time, with no stable-view spatial requests. This is not total native RSS/CPU or a statistical speedup claim.
+
+CI follow-up: retained G2H browser tests expected the explicitly removed Fit Galaxy button and visible framing debug strings; G2M-B required an arbitrary thin-plane ratio. Tests now verify changed marker geometry under zoom, exact Fit Route restoration, shared light-year scale and alignment in all three panels. Runtime assertions, permissions and security gates remain intact.
+
+Implementation commits: `a4979f6` (unified map, preferences, FSD and remaining-route context), `2dba262` (honest disabled renderer states and persisted search inspection); final browser-contract correction is recorded in the draft PR history.
 
 ## Manual acceptance
 
