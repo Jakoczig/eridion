@@ -36,3 +36,17 @@ test('axis ranges remain bounded and do not mutate the original frame', () => {
   assert.deepEqual(adjustAxis(frame, 'y', 1), frame)
   assert.equal(adjustAxis(frame, 'z', 1).z[1] - adjustAxis(frame, 'z', 1).z[0], 250)
 })
+
+test('a disabled density renderer is never selected or described as fallback', () => {
+  const { harness } = require('../helpers/go-panel-harness.cjs')
+  const h = harness('go-unified-galaxy', {})
+  try {
+    h.props.context = { current: point('Known', 10) }
+    h.props.policy = { galaxyMap: false, localAtlas: true }
+    const html = h.html()
+    assert.doesNotMatch(html, /data-mode="galaxy"/)
+    assert.doesNotMatch(html, /showing available overview/)
+    h.props.policy.localAtlas = false
+    assert.match(h.html(), /Map renderers disabled/)
+  } finally { h.unmount() }
+})
