@@ -17,7 +17,7 @@ test('automatic policy targets only selected displays, restores and yields throu
   state = transition(state, { ...input, episode: 'two' }); assert.equal(state.visible, true)
   assert.equal(transition(state, { ...input, mode: 'idle' }).visible, false)
   assert.equal(transition(state, { ...input, fresh: false }).visible, false)
-  assert.equal(transition({}, { ...input, routeKnown: false }).visible, false)
+  assert.equal(transition({}, { ...input, routeKnown: false }).visible, true)
 })
 test('independent mode switches and optional restore', () => {
   const policy = { ...input.policy, charge: false, restore: false }
@@ -36,4 +36,11 @@ test('three galaxy projections preserve Elite Y vertical and real 3D distance', 
   for (const t of ['O', 'B', 'A', 'F', 'G', 'K', 'M']) assert.equal(scoopability(t), 'SCOOPABLE')
   for (const t of ['N', 'D', 'L', 'T', 'Y']) assert.equal(scoopability(t), 'NOT SCOOPABLE')
   assert.equal(scoopability('Mystery'), 'UNKNOWN')
+})
+
+test('map during FSD obeys renderer and display selection without requiring a route', () => {
+  const policy = { selected: true, charge: false, jump: false, mapDuringFSD: true, galaxyMap: true, localAtlas: false }
+  assert.equal(transition({}, { ...input, routeKnown: false, policy }).visible, true)
+  assert.equal(transition({}, { ...input, policy: { ...policy, galaxyMap: false } }).visible, false)
+  assert.equal(transition({}, { ...input, policy: { ...policy, selected: false } }).visible, false)
 })

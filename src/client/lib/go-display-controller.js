@@ -1,10 +1,11 @@
 // Event-driven policy: never issues game commands or opens native windows.
 export function transition (state, input) {
-  const { mode = 'idle', episode = '', fresh, routeKnown, policy = {}, manual, disconnected } = input
+  const { mode = 'idle', episode = '', fresh, policy = {}, manual, disconnected } = input
   if (manual) return { ...state, visible: false, blocked: episode || state.episode }
   if (disconnected || !fresh) return { visible: false, blocked: state.blocked || '', episode: state.episode || '' }
   if (mode === 'idle') return { visible: state.visible && policy.restore === false, blocked: '', episode: state.episode, finished: true }
-  if (!policy.selected || !routeKnown || state.blocked === episode || !(mode === 'charge' ? policy.charge : policy.jump)) return { ...state, visible: false }
+  const mapWanted = policy.mapDuringFSD && (policy.galaxyMap !== false || policy.localAtlas !== false)
+  if (!policy.selected || state.blocked === episode || !(mapWanted || (mode === 'charge' ? policy.charge : policy.jump))) return { ...state, visible: false }
   return { visible: true, blocked: state.blocked, episode, finished: false }
 }
 export function scoopability (type) { if (!type) return 'UNKNOWN'; return /^[OBAFGKM]$/.test(type) ? 'SCOOPABLE' : /^(N|D.*|H|T|L|Y|W.*|S|C.*|MS|AeBe)$/.test(type) ? 'NOT SCOOPABLE' : 'UNKNOWN' }

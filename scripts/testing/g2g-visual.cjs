@@ -63,7 +63,7 @@ async function main () {
       if (viewport !== 'portrait' && !await evaluate('Array.from(document.querySelectorAll(\'.go-galaxy-plane svg\')).every(e=>{const r=e.getBoundingClientRect();return r.height>30&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth})')) throw new Error('Galaxy projections exceed the visible dashboard')
       const projections = await evaluate('Array.from(document.querySelectorAll(\'[data-marker="current"]\')).map(e=>({axes:e.dataset.axes,position:e.dataset.position}))')
       await waitFor(() => evaluate('document.body.innerText.includes(\'Galaxy atlas not installed\')'))
-      if (new Set(projections.map(p => p.axes)).size !== 3 || !await evaluate('document.querySelector(\'.go-galaxy-source\').innerText.includes(\'EDSM\')&&document.querySelector(\'.go-galaxy-source\').innerText.includes(\'not a complete census\')&&!document.querySelector(\'.go-galaxy-plane image\')&&!!Array.from(document.querySelectorAll(\'button\')).find(b=>b.disabled&&b.textContent===\'Navigate (coming later)\')')) throw new Error('Galaxy projection/provenance missing')
+      if (new Set(projections.map(p => p.axes)).size !== 3 || await evaluate('!!document.querySelector(".go-galaxy-source")||document.body.textContent.includes("Navigate (coming later)")')) throw new Error('Unified map retained removed controls')
       await screenshot('galaxy-' + viewport); report.pages.push({ viewport, page: 'galaxy', projections })
     }
     // Use the ordinary owner-authenticated WebSocket, with no Wails bindings.
@@ -80,7 +80,7 @@ async function main () {
     await navigate('/nav/galaxy', 'GALAXY MAP'); host.child.stdin.write('jump\n'); await waitFor(() => evaluate('!!document.querySelector(\'[aria-label="Automatic FSD display"]\')')); host.child.stdin.write('arrival\n'); await waitFor(() => evaluate('!!document.querySelector(\'[aria-label="Galaxy map"]\')&&!document.querySelector(\'[aria-label="Automatic FSD display"]\')')); report.fsd.restoredPriorScreen = true
     await evaluate('(()=>{const i=document.querySelector(\'[aria-label="Galaxy system search"]\');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,\'value\').set.call(i,\'Fixture Beta\');i.dispatchEvent(new Event(\'input\',{bubbles:true}))})()')
     await evaluate('Array.from(document.querySelectorAll(\'button\')).find(b=>b.textContent===\'Lookup with enabled EDSM\').click()')
-    await waitFor(() => evaluate('document.querySelector(\'.go-galaxy-detail\')?.textContent.includes(\'Fixture Beta\')'))
+    await waitFor(() => evaluate('document.querySelector(\'.go-galaxy-sidebar\')?.textContent.includes(\'Fixture Beta\')'))
     await evaluate('Array.from(document.querySelectorAll(\'button\')).find(b=>b.textContent===\'View System\').click()')
     await waitFor(() => evaluate('document.querySelector(\'.go-cartography\')?.textContent.includes(\'Fixture Beta\')')); report.viewSystem = true
     if (report.errors.length || report.blockedRequests.length) throw new Error('Runtime/external request errors')

@@ -35,12 +35,12 @@ test('both desktop OSes have blocking build, security and real executable gates'
   assert.match(job.steps.find(step => step.name === 'Native journal smoke').run, /--desktop-journal-smoke-test/)
   assert.match(job.steps.find(step => step.name === 'Go tests').run, /-count=1/, 'idle/reconnect acceptance must execute freshly on both OSes')
   const pack = job.steps.findIndex(step => step.name === 'Package experimental preview')
-  const upload = job.steps.findIndex(step => String(step.uses).startsWith('actions/upload-artifact@') && String(step.with?.name).startsWith('eridion-g3c-') && String(step.with?.name).endsWith('-x64-experimental-unsigned-preview'))
+  const upload = job.steps.findIndex(step => String(step.uses).startsWith('actions/upload-artifact@') && String(step.with?.name).startsWith('eridion-g3d-') && String(step.with?.name).endsWith('-x64-experimental-unsigned-preview'))
   assert.ok(pack > job.steps.findIndex(step => step.name === 'Native React smoke'), 'packaging must follow all security/native gates')
   assert.ok(pack > job.steps.findIndex(step => step.name === 'Native journal smoke'), 'artifact must wait for G2A native data validation')
   assert.ok(upload > pack, 'missing gated artifact upload')
   assert.equal(job.steps[upload].if, undefined, 'artifact upload must use default success gating')
-  assert.match(job.steps[upload].with.name, /g3c-.*experimental-unsigned-preview/)
+  assert.match(job.steps[upload].with.name, /g3d-.*experimental-unsigned-preview/)
   assert.equal(job.steps[upload].with['if-no-files-found'], 'error')
   assert.match(job.steps[upload].with.path, /^\$\{\{ steps\.preview\.outputs\.directory \}\}$/)
 })
@@ -198,4 +198,16 @@ test('G3C stacks on G2Q and keeps spatial browser verification offline and manda
       assert.doesNotMatch(w.jobs.desktop.steps[index].run, /--live/)
     }
   }
+})
+
+test('G3D checks the stacked G3C target and blocks previews on unified map verification', () => {
+  const workflow = YAML.parse(fs.readFileSync(path.join(__dirname, '../../.github/workflows/go-desktop.yml'), 'utf8'))
+  const legacy = YAML.parse(fs.readFileSync(path.join(__dirname, '../../.github/workflows/ci.yml'), 'utf8'))
+  assert.ok(workflow.on.pull_request.branches.includes('go/g3c-hybrid-spatial-galaxy'))
+  assert.ok(legacy.on.pull_request.branches.includes('go/g3c-hybrid-spatial-galaxy'))
+  const steps = workflow.jobs.desktop.steps
+  const visual = steps.findIndex(s => s.name === 'G3D unified map touch and automatic display verification')
+  assert.ok(visual > 0)
+  assert.equal(steps[visual].if, undefined)
+  assert.ok(steps.findIndex(s => s.name === 'Package experimental preview') > visual)
 })
