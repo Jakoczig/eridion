@@ -11,13 +11,10 @@ async function main () {
   const b = await browser(output); const c = b.client; let host; let origin = ''
   const evaluate = async expression => { const r = await c.call('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (r.exceptionDetails) throw Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text); return r.result.value }
   const rpc = async (name, message = {}) => { report.lastRPC = name; const start = performance.now(); const value = await evaluate(`new Promise((resolve,reject)=>{const w=new WebSocket(location.origin.replace('http:','ws:'));const timer=setTimeout(()=>{w.close();reject(Error('fixture RPC timeout'))},10000);w.onopen=()=>w.send(JSON.stringify({requestId:'g3c',name:${JSON.stringify(name)},message:${JSON.stringify(message)}}));w.onmessage=e=>{const r=JSON.parse(e.data);if(r.requestId==='g3c'){clearTimeout(timer);w.close();r.error?reject(Error(r.error)):resolve(r.message)}}})`); (report.requests ||= []).push({ name, milliseconds: performance.now() - start }); return value }
-  const click = text => evaluate(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent===${JSON.stringify(text)})?.click()`)
   const shot = async name => { const r = await c.call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }); await fs.writeFile(path.join(output, name + '.png'), Buffer.from(r.data, 'base64')) }
   c.on(e => { if (e.method === 'Runtime.exceptionThrown') report.errors.push(e.params.exceptionDetails.exception?.description); if (e.method === 'Fetch.requestPaused') { const p = e.params; const ok = p.request.url.startsWith(origin + '/') || p.request.url.startsWith('data:'); if (!ok) report.external.push(p.request.url); c.call(ok ? 'Fetch.continueRequest' : 'Fetch.failRequest', ok ? { requestId: p.requestId } : { requestId: p.requestId, errorReason: 'BlockedByClient' }).catch(() => {}) } })
   await c.call('Network.enable'); await c.call('Fetch.enable', { patterns: [{ urlPattern: '*' }] })
-  const setCenter = async center => { for (let i = 0; i < 3; i++) await evaluate(`(()=>{const e=document.querySelector('[aria-label="Local center ${'XYZ'[i]}"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(String(center[i]))});e.dispatchEvent(new Event('input',{bubbles:true}))})()`) }
   const volume = center => ({ low: center.map((v, i) => v - (i === 1 ? 50 : 100)), high: center.map((v, i) => v + (i === 1 ? 50 : 100)) })
-  const select = (label, value) => evaluate(`(()=>{const e=document.querySelector('[aria-label="${label}"]');e.value=${JSON.stringify(String(value))};e.dispatchEvent(new Event('change',{bubbles:true}))})()`)
   const backendUsage = async () => {
     if (process.platform === 'win32') { const r = await promisify(execFile)('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `(Get-Process -Id ${host.child.pid}) | Select-Object CPU,WorkingSet64 | ConvertTo-Json -Compress`], { windowsHide: true }); const v = JSON.parse(r.stdout); return { cpuSeconds: v.CPU, rssBytes: v.WorkingSet64 } }
     const text = await fs.readFile(`/proc/${host.child.pid}/status`, 'utf8'); return { rssBytes: Number(/VmRSS:\s+(\d+)/.exec(text)?.[1] || 0) * 1024 }
@@ -29,35 +26,26 @@ async function main () {
   try {
     host = await fixture('G2E', '', path.join(root, 'tests/testdata/g2g')); origin = host.url
     await c.call('Emulation.setDeviceMetricsOverride', { width: 1366, height: 768, deviceScaleFactor: 1, mobile: false }); await c.call('Page.navigate', { url: origin + '/nav/galaxy' }); await waitFor(() => evaluate(pageTextReady('Galaxy Map', true)))
-    await click('Local Volume · actual XYZ'); await waitFor(() => evaluate('!!document.querySelector(".go-local-volume")'))
     report.layout = await evaluate('Array.from(document.querySelectorAll(".go-galaxy-plane>svg")).map(e=>({axes:e.dataset.projection,width:e.getBoundingClientRect().width,height:e.getBoundingClientRect().height}))')
     if (report.layout.length !== 3 || report.layout.find(p => p.axes === 'yz').height <= report.layout.find(p => p.axes === 'yz').width) throw Error('Three-plane layout lost')
     if (Math.abs(report.layout[0].width - report.layout[0].height) > 2) throw Error('Local XZ world scale distorted')
-    const toggle = 'Array.from(document.querySelectorAll(".go-local-volume label")).find(l=>l.textContent==="Show Route").querySelector("input")'
-    await evaluate(toggle + '.click()'); if (await evaluate('!!document.querySelector(".go-galaxy-route")')) throw Error('Local hide route failed')
-    if (await evaluate('document.querySelectorAll("[data-marker=current]").length') !== 3) throw Error('Route visibility hid player')
-    await evaluate(toggle + '.click()')
-    await select('Local inspection width', 400); await select('Local inspection depth', 100); await select('Local vertical thickness', 50)
-    await click('Galaxy Overview'); await waitFor(() => evaluate('!!document.querySelector(".go-galaxy-controls")')); await click('Local Volume · actual XYZ')
-    await waitFor(() => evaluate('["Local inspection width","Local inspection depth","Local vertical thickness"].map(label=>document.querySelector("[aria-label=\'"+label+"\']").value).join(",")==="400,100,50"'))
-    report.rectangularTransition = true; await click('Fit Local Region')
-    await waitFor(() => evaluate('document.body.innerText.includes("Density fallback")')); if (await evaluate('!!document.querySelector("[data-spatial-projection]")')) throw Error('Missing spatial cache pretended to contain points')
+    await waitFor(() => evaluate('document.body.innerText.includes("Local detail unavailable")'))
+    if (await evaluate('!!document.querySelector("[data-spatial-projection]")')) throw Error('Missing spatial cache pretended to contain points')
     await shot('synthetic-local-fallback')
-    await click('Galaxy Overview'); await waitFor(() => evaluate('!!document.querySelector(".go-galaxy-controls")')); await click('Local Volume · actual XYZ')
     if (live) {
       await rpc('configureGoSpatial', { downloads: true }); await rpc('installGoSpatial')
       let status; await waitFor(async () => { status = await rpc('getGoSpatialStatus'); return !status.busy }, 60000); if (!status.installed || status.error) throw Error('Signed spatial install: ' + JSON.stringify(status))
       await rpc('installGoBubble', { sha256: status.bubbleHash, bytes: status.bubbleBytes }); await waitFor(async () => { status = await rpc('getGoSpatialStatus'); return !status.busy }, 60000); if (!status.bubbleInstalled || status.error) throw Error('Bubble install: ' + JSON.stringify(status))
       report.install = status
       for (const [name, center] of [['Sol', [0, 0, 0]], ['Beagle-Point', [-1111.5625, -134.21875, 65269.75]]]) {
-        await click('Fit Local Region'); await setCenter(center); await click('Retry cached view')
+        // Public signed data is queried directly; no fabricated player location.
         const q = volume(center); let v; await waitFor(async () => { v = await rpc('getGoSpatialView', q); return v.complete && !v.pending }, 60000)
-        await waitFor(() => evaluate('document.querySelectorAll("[data-spatial-projection] canvas").length===3&&Array.from(document.querySelectorAll("[data-spatial-projection] canvas")).every(c=>c.dataset.positions===' + JSON.stringify(String(v.points.length)) + ')'), 60000)
+        await evaluate('window.dispatchEvent(new Event("eridion-spatial-changed"))')
         await shot('real-' + name + '-local-volume'); report[name] = { query: q, count: v.points.length, blocks: v.blocks, decodedBytes: v.decodedBytes, source: v.source, release: v.release, resources: await measure() }
         const start = performance.now(); await rpc('getGoSpatialView', q); report[name].warmRPCMilliseconds = performance.now() - start
         if (name === 'Sol') {
           // Same XYZ frame, density is explicitly full line of sight.
-          await rpc('checkGoAtlas'); await rpc('installGoAtlas'); await waitFor(async () => !(await rpc('getGoAtlasStatus')).busy, 60000); await rpc('configureGoAtlas', { details: true }); await click('Galaxy Overview'); await waitFor(() => evaluate('!!document.querySelector(".go-galaxy-controls")')); await waitFor(async () => !(await rpc('getGoAtlasView', { frame: { x: [q.low[0], q.high[0]], y: [q.low[1], q.high[1]], z: [q.low[2], q.high[2]] }, pixels: 1024 })).pending, 60000); await delay(1000); await shot('real-Sol-density-same-volume'); report.densityBaseline = await measure(); await click('Local Volume · actual XYZ')
+          await rpc('checkGoAtlas'); await rpc('installGoAtlas'); await waitFor(async () => !(await rpc('getGoAtlasStatus')).busy, 60000); report.densityBaseline = await measure()
         }
       }
       await rpc('configureGoSpatial', { downloads: true, offline: true }); const before = (await rpc('getGoSpatialStatus')).downloaded

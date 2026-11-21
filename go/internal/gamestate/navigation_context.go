@@ -15,27 +15,46 @@ func (s *Service) NavigationContext() navcontext.View {
 		v.Fresh = false
 		v.Mode = "idle"
 	}
+	// Reserve current/destination and remaining legs before bounded historical context.
+	history := v.Points
+	v.Points = nil
 	seen := map[string]bool{}
-	for _, p := range v.Points {
-		seen[p.Address] = true
-	}
-	positions := s.views.navigation.VerifiedPositions(s.displayFIDLocked())
-	// Reserve the coordinate-verified destination before filling the bounded route context.
-	for i := range positions {
-		index := i - 1
-		if i == 0 {
-			index = len(positions) - 1
-		}
-		p := positions[index]
-		if len(v.Points) >= 192 {
-			break
-		}
-		if !seen[p.Address] {
-			x := p.Coordinates
-			v.Points = append(v.Points, navcontext.Point{Name: p.Name, Address: p.Address, Coordinates: &x, Source: "verified_route"})
+	add := func(p navcontext.Point) {
+		if len(v.Points) < 192 && !seen[p.Address] {
+			v.Points = append(v.Points, p)
 			seen[p.Address] = true
 		}
 	}
+	if v.Current != nil {
+		add(*v.Current)
+	}
+	positions := s.views.navigation.VerifiedPositions(s.displayFIDLocked())
+	hops := s.views.navigation.View(s.displayFIDLocked()).Hops
+	start := 0
+	for i, h := range hops {
+		if h.IsCurrent {
+			start = i
+		}
+		if h.IsNext {
+			start = i
+			break
+		}
+	}
+	addPosition := func(i int) {
+		p := positions[i]
+		x := p.Coordinates
+		add(navcontext.Point{Name: p.Name, Address: p.Address, Coordinates: &x, Source: "verified_route"})
+	}
+	if len(positions) > 0 {
+		addPosition(len(positions) - 1)
+	}
+	for i := start; i < len(positions); i++ {
+		addPosition(i)
+	}
+	for _, p := range history {
+		add(p)
+	}
+
 	return v
 }
 func (s *Service) KnownSystem(name string) (navcontext.Point, explorestate.ExplorationView) {

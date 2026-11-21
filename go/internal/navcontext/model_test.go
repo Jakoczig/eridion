@@ -42,15 +42,15 @@ func TestLiveJumpReplayIsolationAndExpiry(t *testing.T) {
 		t.Fatal("arrival did not restore")
 	}
 }
-func TestChargeRequiresExplicitHyperdriveAndCancel(t *testing.T) {
+func TestChargeLegacyFallbackAndExplicitHyperdriveCancel(t *testing.T) {
 	m := New()
 	feed(t, m, "a", `{"event":"LoadGame","timestamp":"2026-01-01T00:00:01Z","FID":"a"}`, journal.Live)
 	feed(t, m, "a", `{"event":"Location","timestamp":"2026-01-01T00:00:02Z","StarSystem":"Fixture","SystemAddress":1}`, journal.Live)
 	v := paritystate.StatusView{State: "known", ObservedAt: "2026-01-01T00:00:03Z", Flags: &paritystate.StatusFlags{InMainShip: true, FSDCharging: true}}
 	m.Status("a", v)
 	at, _ := time.Parse(time.RFC3339, v.ObservedAt)
-	if m.View("a", at).Mode != "idle" {
-		t.Fatal("generic supercruise charge accepted")
+	if m.View("a", at).Mode != "charge" {
+		t.Fatal("legacy FSD charge ignored")
 	}
 	v.Flags2 = &paritystate.StatusFlags2{FSDHyperdriveCharging: true}
 	m.Status("a", v)
@@ -90,5 +90,24 @@ func TestCancelledChargeRejectsOlderDelayedJump(t *testing.T) {
 	at, _ := time.Parse(time.RFC3339, v.ObservedAt)
 	if m.View("a", at).Mode != "idle" {
 		t.Fatal("cancelled charge resurrected by delayed jump")
+	}
+}
+
+func TestStatusJumpPreservesChargeEpisode(t *testing.T) {
+	m := New()
+	feed(t, m, "a", `{"event":"LoadGame","timestamp":"2026-01-01T00:00:01Z","FID":"a"}`, journal.Live)
+	feed(t, m, "a", `{"event":"Location","timestamp":"2026-01-01T00:00:02Z","StarSystem":"One","SystemAddress":1}`, journal.Live)
+	v := paritystate.StatusView{State: "known", ObservedAt: "2026-01-01T00:00:03Z", Flags: &paritystate.StatusFlags{InMainShip: true, FSDCharging: true}}
+	m.Status("a", v)
+	at, _ := time.Parse(time.RFC3339, v.ObservedAt)
+	episode := m.View("a", at).Episode
+	v.ObservedAt = "2026-01-01T00:00:04Z"
+	v.Flags.FSDCharging = false
+	v.Flags.FSDJump = true
+	m.Status("a", v)
+	feed(t, m, "a", `{"event":"StartJump","timestamp":"2026-01-01T00:00:05Z","JumpType":"Hyperspace"}`, journal.Live)
+	at = at.Add(2 * time.Second)
+	if got := m.View("a", at); got.Mode != "jump" || episode == "" || got.Episode != episode {
+		t.Fatal("jump reopened episode", got)
 	}
 }

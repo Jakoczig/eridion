@@ -42,10 +42,30 @@ func TestG2HDestinationSurvivesBoundedGalaxyContext(t *testing.T) {
 	if len(v.Points) > 192 {
 		t.Fatal("unbounded context")
 	}
+	found := false
 	for _, p := range v.Points {
 		if p.Name == "Fixture Route 219" && p.Coordinates != nil {
-			return
+			found = true
 		}
 	}
-	t.Fatal("known plotted destination was lost to the context budget")
+	if !found {
+		t.Fatal("known plotted destination was lost to the context budget")
+	}
+	appendEvent(t, dir, `{"event":"FSDJump","timestamp":"2026-01-01T00:00:20Z","StarSystem":"Fixture Route 210","SystemAddress":9007199254741203,"StarPos":[210,0,0]}`)
+	waitProjection(t, s, func() bool { return s.Navigation().CurrentSystem == "Fixture Route 210" })
+	v = s.NavigationContext()
+	if len(v.Points) > 192 {
+		t.Fatal("unbounded remaining context")
+	}
+	for i := 211; i < 220; i++ {
+		found = false
+		for _, p := range v.Points {
+			if p.Name == fmt.Sprintf("Fixture Route %d", i) && p.Coordinates != nil {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("upcoming hop %d lost behind completed legs", i)
+		}
+	}
 }

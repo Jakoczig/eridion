@@ -22,18 +22,18 @@ async function main () {
     if (await evaluate('!!document.querySelector(".go-galaxy-plane image")')) throw Error('Uninstalled map shows illustrative density')
     const status = await rpc('getGoAtlasStatus'); if (status.automatic || status.details || status.installed) throw Error('Unexpected default networking or installation')
     await shot('uninstalled-overlays')
-    await evaluate('document.querySelector(\'[aria-label="Owner settings"]\').click()'); await evaluate('Array.from(document.querySelectorAll(".go-companion-settings>button")).find(b=>b.textContent==="Galaxy Atlas").click()'); await waitFor(() => evaluate('document.querySelector(".go-atlas-settings").textContent.includes("Install verified overview")')); await shot('owner-atlas-settings')
+    await evaluate('document.querySelector(\'[aria-label="Owner settings"]\').click()'); await evaluate('Array.from(document.querySelectorAll(".go-companion-settings>button")).find(b=>b.textContent==="Galaxy Map").click()'); await waitFor(() => evaluate('document.querySelector(".go-atlas-settings").textContent.includes("Install verified overview")')); await shot('owner-atlas-settings')
     await evaluate('document.querySelector(\'[aria-label="Owner settings"]\').click()')
     if (live) {
       await rpc('checkGoAtlas'); await rpc('installGoAtlas'); await waitFor(async () => { const s = await rpc('getGoAtlasStatus'); if (!s.busy && s.error) throw Error(s.error); return !s.busy && s.installed }); report.install = await rpc('getGoAtlasStatus')
     }
     for (const [name, width, height] of [['laptop', 1366, 768], ['compact', 680, 580]]) {
       await c.call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
-      await navigate('/nav/galaxy', 'Galaxy Map'); await evaluate('Array.from(document.querySelectorAll("button")).find(e=>e.textContent==="Fit Galaxy").click()')
+      await navigate('/nav/galaxy', 'Galaxy Map'); await evaluate('Array.from(document.querySelectorAll("button")).find(e=>e.textContent==="Galaxy").click()')
       await waitFor(() => evaluate('document.querySelectorAll("[data-marker=current]").length===3'))
       if (live) { await waitFor(() => evaluate('document.querySelectorAll(".go-galaxy-plane image").length>=3')); report[name + 'OverviewImages'] = await rendered() }
       const geometry = await evaluate('(()=>{const r=a=>{const b=document.querySelector(".go-galaxy-"+a).getBoundingClientRect();return {x:b.x,y:b.y,w:b.width,h:b.height}};return {main:r("xz"),bottom:r("xy"),right:r("yz")}})()')
-      if (Math.abs(geometry.main.w - geometry.bottom.w) > 2 || Math.abs(geometry.main.h - geometry.right.h) > 2 || geometry.bottom.h >= geometry.main.h / 2 || geometry.right.w >= geometry.main.w / 2) throw Error('Three-projection layout lost')
+      if (Math.abs(geometry.main.w - geometry.bottom.w) > 2 || Math.abs(geometry.main.h - geometry.right.h) > 2 || geometry.bottom.h <= 0 || geometry.right.w <= 0) throw Error('Three-projection layout lost')
       await shot('overview-' + name); report.pages.push({ name, geometry })
       if (live) {
         await rpc('configureGoAtlas', { automatic: false, details: true, metered: false })

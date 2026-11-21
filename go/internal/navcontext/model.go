@@ -200,13 +200,15 @@ func (m *Model) Status(key string, v paritystate.StatusView) {
 		return
 	}
 	s.statusAt = at
-	if v.Flags2 != nil && v.Flags2.FSDHyperdriveCharging {
+	// Prefer the modern hyperdrive flag; old Status writers only expose FSDCharging.
+	charging := v.Flags2 != nil && v.Flags2.FSDHyperdriveCharging || v.Flags2 == nil && v.Flags.FSDCharging
+	if v.Flags.FSDJump {
+		m.mode(s, "jump", at)
+	} else if charging && s.mode != "jump" {
 		m.mode(s, "charge", at)
 	} else if s.mode == "charge" {
 		s.mode = ""
 		s.episode = ""
-	} else if s.mode == "jump" && v.Flags.FSDJump {
-		s.modeAt = at
 	}
 }
 func clone(p Point) Point {

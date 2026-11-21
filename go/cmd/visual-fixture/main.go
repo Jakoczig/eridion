@@ -236,6 +236,8 @@ func main() {
 			var e any
 			if kind == "empty-system" {
 				e = map[string]any{"event": "Location", "timestamp": at, "StarSystem": "Fixture Empty", "SystemAddress": uint64(9007199254740995)}
+			} else if kind == "clear-route" {
+				e = map[string]any{"event": "NavRouteClear", "timestamp": at}
 			} else if kind == "jump" {
 				e = map[string]any{"event": "StartJump", "JumpType": "Hyperspace", "timestamp": at, "StarSystem": "Fixture Beta", "SystemAddress": uint64(9007199254740994)}
 			} else if kind == "arrival" {

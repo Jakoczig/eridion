@@ -10,13 +10,16 @@ import (
 )
 
 type displayConfig struct {
-	Charge     bool     `json:"charge"`
-	Jump       bool     `json:"jump"`
-	Restore    bool     `json:"restore"`
-	Owner      bool     `json:"owner"`
-	AllViewers bool     `json:"allViewers"`
-	Devices    []string `json:"devices"`
-	CloseMode  string   `json:"closeMode"`
+	GalaxyMap    *bool    `json:"galaxyMap,omitempty"`
+	LocalAtlas   *bool    `json:"localAtlas,omitempty"`
+	MapDuringFSD bool     `json:"mapDuringFSD"`
+	Charge       bool     `json:"charge"`
+	Jump         bool     `json:"jump"`
+	Restore      bool     `json:"restore"`
+	Owner        bool     `json:"owner"`
+	AllViewers   bool     `json:"allViewers"`
+	Devices      []string `json:"devices"`
+	CloseMode    string   `json:"closeMode"`
 }
 type companionState struct {
 	mu       sync.Mutex
@@ -67,7 +70,7 @@ func (s *Server) displayPolicy(p socketPrincipal) map[string]any {
 	if p.role != "owner" {
 		selected = c.AllViewers || slices.Contains(c.Devices, p.deviceID)
 	}
-	return map[string]any{"selected": selected, "charge": c.Charge, "jump": c.Jump, "restore": c.Restore}
+	return map[string]any{"selected": selected, "charge": c.Charge, "jump": c.Jump, "restore": c.Restore, "galaxyMap": c.GalaxyMap == nil || *c.GalaxyMap, "localAtlas": c.LocalAtlas == nil || *c.LocalAtlas, "mapDuringFSD": c.MapDuringFSD}
 }
 func (s *Server) saveDisplayConfig(raw []byte) error {
 	var c displayConfig

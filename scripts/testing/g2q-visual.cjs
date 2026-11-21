@@ -29,11 +29,10 @@ async function main () {
       await c.call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: dpr, mobile: false }); await c.call('Page.navigate', { url: origin + '/nav/galaxy' }); await waitFor(() => evaluate(pageTextReady('Galaxy Map', true))); await evaluate('document.fonts.ready.then(()=>true)')
       const geometry = await evaluate('(()=>{const outer=document.querySelector(\'.go-galaxy-xz>svg\');const tile=document.createElementNS(\'http://www.w3.org/2000/svg\',\'svg\');tile.setAttribute(\'width\',\'20\');tile.setAttribute(\'height\',\'30\');const fill=document.createElementNS(\'http://www.w3.org/2000/svg\',\'rect\');fill.setAttribute(\'width\',\'100%\');fill.setAttribute(\'height\',\'100%\');tile.append(fill);outer.append(tile);const a=outer.getBoundingClientRect(),b=tile.getBoundingClientRect(),style=getComputedStyle(tile);const info={outer:a.width,tile:b.width,ratio:b.width/a.width,cssWidth:style.width,cssHeight:style.height,display:style.display,viewBox:outer.getAttribute("viewBox")};tile.remove();return info})()')
       if (Math.abs(geometry.ratio - 0.2) > 0.015) throw Error('Tile viewport stretched by outer projection CSS: ' + JSON.stringify(geometry))
-      const input = 'Array.from(document.querySelectorAll(".go-galaxy-controls label")).find(l=>l.textContent==="Show Route").querySelector("input")'
       if (!await evaluate('!!document.querySelector(".go-galaxy-route")')) throw Error('Default route missing')
-      await evaluate(input + '.click()'); if (await evaluate('!!document.querySelector(".go-galaxy-route")')) throw Error('Hide route failed')
-      if (await evaluate('document.querySelectorAll("[data-marker=current]").length') !== 3) throw Error('Route toggle hid current-system markers')
-      await evaluate(input + '.click()'); await shot('overlays-' + name); report.pages.push({ name, dpr, geometry, routeToggle: true })
+      if (await evaluate('document.body.textContent.includes("Show Route")')) throw Error('Obsolete route control')
+      if (await evaluate('document.querySelectorAll("[data-marker=current]").length') !== 3) throw Error('Current-system markers missing')
+      await shot('overlays-' + name); report.pages.push({ name, dpr, geometry, alwaysVisibleRoute: true })
     }
     // Mount the exact canvas module in a tiny test-only hook host. Real DOM,
     // decoding, alpha and canvas are exercised; the PNG/coordinates are synthetic.
@@ -51,10 +50,10 @@ async function main () {
     if (live) {
       await rpc('checkGoAtlas'); await rpc('installGoAtlas'); await waitFor(async () => { const s = await rpc('getGoAtlasStatus'); if (!s.busy && s.error) throw Error(s.error); return !s.busy && s.installed }, 60000)
       await c.call('Page.navigate', { url: origin + '/nav/galaxy' }); await waitFor(() => evaluate(pageTextReady('Galaxy Map', true))); await waitFor(() => evaluate('document.body.textContent.includes("fallback")'))
-      await shot('real-L4-fallback-route'); await evaluate('Array.from(document.querySelectorAll(".go-galaxy-controls label")).find(l=>l.textContent==="Show Route").querySelector("input").click()'); await shot('real-L4-fallback-no-route')
+      await shot('real-L4-fallback-route'); await shot('real-L4-fallback-no-route')
       await rpc('configureGoAtlas', { automatic: false, details: true, metered: false }); await evaluate('window.dispatchEvent(new Event("eridion-atlas-changed"))')
       await waitFor(() => evaluate('!!document.querySelector(".go-galaxy-xz canvas[data-mode=occupied-bins]")&&Array.from(document.querySelectorAll("[data-source-level]")).filter(e=>e.getAttribute("data-source-level")==="7").length>=3'), 60000)
-      await waitFor(() => evaluate('document.querySelector(".go-galaxy-source").textContent.includes("Displayed L7 · 0 unavailable")'), 60000)
+      await waitFor(async () => { const v = await rpc('getGoAtlasView', viewRequest); return !v.pending && !v.missing }, 60000)
       await shot('real-L7-occupied-bins-no-route'); report.liveStatus = await rpc('getGoAtlasStatus'); report.liveView = await rpc('getGoAtlasView', viewRequest)
       const densityPNG = await evaluate('(()=>{const source=document.querySelector(".go-galaxy-xz canvas");const out=document.createElement("canvas");out.width=source.width;out.height=source.height;const ctx=out.getContext("2d");ctx.fillStyle="#01050d";ctx.fillRect(0,0,out.width,out.height);ctx.drawImage(source,0,0);return out.toDataURL("image/png").split(",")[1]})()')
       await fs.writeFile(path.join(output, 'eridion-density-only.png'), Buffer.from(densityPNG, 'base64'))
