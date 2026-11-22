@@ -135,10 +135,13 @@ async function main () {
       await screenshot('community-map-' + viewport)
       report.pages.push({ viewport, page: 'community-map', provenance: true, stations: true })
     }
-    await evaluate('document.querySelector(\'[aria-label="Owner settings"]\').click()')
+    await navigate('/launcher', 'NATIVE COMPANION'); await evaluate('Array.from(document.querySelectorAll(".go-launcher-actions button")).find(b=>b.textContent==="Settings").click()'); await waitFor(() => evaluate('!!document.querySelector(".go-companion-settings")')); await evaluate('Array.from(document.querySelectorAll(".go-companion-settings>button")).find(b=>b.textContent==="Advanced").click()')
+    await waitFor(() => evaluate('!!document.querySelector(\'.go-data-providers\')'))
     await evaluate('document.querySelector(\'.go-data-providers\').open=true')
     await waitFor(() => evaluate('document.querySelector(\'[aria-label="Optional EDSM enrichment"]\')?.textContent.includes(\'Disable EDSM lookups\')'))
     await evaluate('Array.from(document.querySelectorAll(\'[aria-label="Optional EDSM enrichment"] button\')).find(b=>b.textContent===\'Disable EDSM lookups\').click()')
+    await waitFor(() => evaluate('Array.from(document.querySelectorAll(\'[aria-label="Optional EDSM enrichment"] button\')).some(b=>b.textContent.includes(\'Enable\'))'))
+    await navigate('/nav/map', 'SYSTEM CARTOGRAPHY')
     await waitFor(() => evaluate("!document.querySelector('[aria-label=\"Inspect Fixture Community Planet\"]')&&!document.querySelector('.go-station-inspector,.go-chart__stations')"))
     report.community = { mockOnly: true, ownerDisableClears: true }
     if (report.errors.length || report.blockedRequests.length) throw new Error('Runtime errors or unexpected external requests')

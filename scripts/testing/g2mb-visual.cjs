@@ -29,15 +29,15 @@ async function main () {
       if (await evaluate('!!document.querySelector(".go-context-activity")') || requests.includes('getGoBGSTally')) throw Error('Commander layout mounted the full activity ledger: ' + url)
     }
     report.commanderUncluttered = true
-    await navigate('/cmdr/overview', 'Pilot ranks')
+    // Task 13: private activity is gameplay on /missions/local-activity for
+    // every trusted display, still mounted only after an explicit open.
     requests.length = 0
-    await evaluate('document.querySelector(\'[aria-label="Owner settings"]\').click()')
+    await navigate('/missions/local-activity', 'Local activity')
     await waitFor(() => evaluate('!!document.querySelector(".go-private-activity")'))
     if (await evaluate('document.querySelector(".go-private-activity").open') || requests.includes('getGoBGSTally')) throw Error('Private activity queried before explicit open')
     await evaluate('document.querySelector(".go-private-activity>summary").click()')
     await waitFor(() => evaluate('!!document.querySelector(".go-private-activity .go-context-activity")'))
     await waitFor(() => requests.includes('getGoBGSTally'))
-    await evaluate('document.querySelector(\'[aria-label="Close settings"]\').click()')
     report.ownerActivityExplicitOnly = true
 
     for (const [name, width, height] of [['laptop', 1366, 768], ['desktop', 1920, 1080], ['compact', 680, 580], ['portrait', 820, 1180]]) {

@@ -17,6 +17,9 @@ async function main () {
     host = await fixture('G2E', '', path.join(root, 'tests/testdata/g2l'), false, { frontier: true }); origin = host.url
     await c.call('Emulation.setDeviceMetricsOverride', { width: 1366, height: 768, deviceScaleFactor: 1, mobile: false })
     await navigate('/ship/status', 'SHIP')
+    // Providers stay blocked until a commander is resolved; this single-commander
+    // fixture adopts its default once the import finishes.
+    await waitFor(async () => (await rpc('getGoAccounts')).settings?.defaultFID === 'SYNTHETIC-G2B')
     await rpc('configureGoProvider', { id: 'frontier', config: { read: true } }); await rpc('readGoProvider', { id: 'frontier', kind: 'profile' })
     const before = JSON.stringify((await rpc('getGoOperations', { kind: 'goals' })).goalMembership)
     await new Promise(resolve => { const ready = data => { if (data.toString().includes('FRONTIER_TICKED')) { host.child.stdout.off('data', ready); resolve() } }; host.child.stdout.on('data', ready); host.child.stdin.write('frontier-tick\n') })

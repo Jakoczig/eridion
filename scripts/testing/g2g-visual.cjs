@@ -25,7 +25,7 @@ async function main () {
       await c.call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: factor, mobile: false })
       await navigate('/launcher', 'NATIVE COMPANION')
       await evaluate('Array.from(document.querySelectorAll(".go-launcher-actions button")).find(b=>b.textContent==="Settings").click()')
-      await waitFor(() => evaluate('document.querySelectorAll(".go-companion-settings>button").length===5'))
+      await waitFor(() => evaluate('document.querySelectorAll(".go-companion-settings>button").length===6'))
       await evaluate('Array.from(document.querySelectorAll(".go-companion-settings>button")).find(b=>b.textContent==="Credits").focus()')
       await c.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' })
       await c.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })

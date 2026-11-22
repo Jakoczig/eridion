@@ -75,7 +75,8 @@ func TestAuditRPCClassificationComplete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	src := string(raw)
+	// Windows checkouts may use CRLF; parse line structure independently.
+	src := strings.ReplaceAll(string(raw), "\r\n", "\n")
 	start := strings.Index(src, "switch request.Name {")
 	end := strings.Index(src[start:], "default:\n\t\t\tresponse[\"error\"] = \"Not implemented")
 	if start < 0 || end < 0 {
