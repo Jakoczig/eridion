@@ -143,6 +143,9 @@ func TestG2MCStartupDoesNotCrossCommanders(t *testing.T) {
 	for _, e := range b {
 		s.applyEventLocked(e, journal.Replay)
 	}
+	// Observe B explicitly; the persisted default A is not replaced implicitly.
+	s.accounts = AccountSettings{Multiple: true, Selected: "SYNTHETIC-B", Default: s.accounts.Default}
+	s.cachedProjection = nil
 	if s.Workspace().Parity.Materials.State == "known" || len(s.Workspace().Activity.Commander.Ranks) > 0 {
 		t.Fatal("A snapshots assigned to B")
 	}
@@ -283,6 +286,11 @@ func TestG2MCNewSourcePreludePersistsAcrossRestart(t *testing.T) {
 	// Event ingestion can reach 11 while catch-up still exposes the held cached
 	// workspace. Assert the reconstructed fields only after replay completion.
 	waitState(t, s, func(v Summary) bool { return !v.ImportInProgress && v.EventsRead == 11 })
+	// SYNTHETIC-OLD was adopted as the sole default; choose the new commander
+	// explicitly as the launcher would.
+	if err := s.SetDefaultAccount("SYNTHETIC-A"); err != nil {
+		t.Fatal(err)
+	}
 	requireStartup(t, s)
 }
 
@@ -304,6 +312,11 @@ func TestG2MCClosedGameRetainsOnlyLastKnownSnapshot(t *testing.T) {
 	s, stop = durableService(t, profile, dir)
 	defer stop()
 	waitState(t, s, func(v Summary) bool { return !v.ImportInProgress && v.EventsRead == 11 })
+	// SYNTHETIC-OLD was adopted as the sole default; choose the new commander
+	// explicitly as the launcher would.
+	if err := s.SetDefaultAccount("SYNTHETIC-A"); err != nil {
+		t.Fatal(err)
+	}
 	requireStartup(t, s)
 }
 

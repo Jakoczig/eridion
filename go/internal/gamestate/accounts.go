@@ -1,26 +1,149 @@
 package gamestate
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"github.com/Jakoczig/eridion/go/internal/catalog"
 	"github.com/Jakoczig/eridion/go/internal/history"
 	"github.com/Jakoczig/eridion/go/internal/privatefs"
+	"os"
 	"time"
 )
 
+// AccountSettings holds the persisted commander preferences. Default is the
+// configured single-mode commander; Selected is the separate, temporary
+// multi-mode choice. Neither follows journal import order.
 type AccountSettings struct {
+	Version  int    `json:"version,omitempty"`
 	Multiple bool   `json:"multiple"`
 	Selected string `json:"selected"`
+	Default  string `json:"defaultFID,omitempty"`
+}
+
+const (
+	accountSettingsFile     = "accounts-v1.json"
+	accountRecoveryFile     = "accounts-v1.recovery.json"
+	accountSettingsVersion  = 2
+	maxAccountSettingsBytes = 4096
+)
+
+func validAccountFID(fid string) bool { return fid == "" || (len(fid) <= 128 && safeText(fid)) }
+
+// LoadAccountSettings strictly decodes the versioned preference file. A
+// missing file is a valid first run. A damaged or unsupported file returns
+// an error so callers keep it for recovery instead of silently choosing a
+// different account. A prior explicit selection migrates to the default.
+func LoadAccountSettings(dir string) (AccountSettings, error) {
+	var out AccountSettings
+	if dir == "" {
+		return out, nil
+	}
+	raw, err := privatefs.Read(dir, accountSettingsFile)
+	if os.IsNotExist(err) {
+		return out, nil
+	}
+	if err != nil {
+		return out, err
+	}
+	if len(raw) > maxAccountSettingsBytes {
+		return AccountSettings{}, errors.New("Account preferences exceed limit")
+	}
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.DisallowUnknownFields()
+	if err = d.Decode(&out); err != nil || d.More() {
+		return AccountSettings{}, errors.New("Account preferences are damaged")
+	}
+	if out.Version < 0 || out.Version > accountSettingsVersion || !validAccountFID(out.Selected) || !validAccountFID(out.Default) {
+		return AccountSettings{}, errors.New("Account preferences are unsupported")
+	}
+	if out.Default == "" && out.Selected != "" {
+		out.Default = out.Selected
+	}
+	return out, nil
+}
+
+// loadAccountsForService keeps an unreadable preference file aside for
+// recovery (without overwriting an earlier preserved copy) and starts with
+// no default, so the launcher asks once instead of guessing.
+func loadAccountsForService(dir string) (AccountSettings, string) {
+	settings, err := LoadAccountSettings(dir)
+	if err == nil {
+		return settings, ""
+	}
+	if raw, e := privatefs.Read(dir, accountSettingsFile); e == nil {
+		if _, e = privatefs.Read(dir, accountRecoveryFile); os.IsNotExist(e) {
+			_ = privatefs.Write(dir, accountRecoveryFile, raw)
+		}
+	}
+	return AccountSettings{}, err.Error()
 }
 
 func (s *Service) displayFIDLocked() string {
 	if s.accounts.Multiple {
 		return s.accounts.Selected
 	}
+	if s.accounts.Default != "" {
+		return s.accounts.Default
+	}
 	return s.active
 }
+
+// PinnedAccount is the commander whose provider namespace and remote account
+// binding must stay fixed regardless of the journal-active commander.
+func (s *Service) PinnedAccount() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.accounts.Multiple {
+		return s.accounts.Selected
+	}
+	return s.accounts.Default
+}
+
+// DefaultRequired reports a one-time launcher setup: several verified
+// commanders are known, or the stored preference could not be read, and no
+// default has been chosen yet.
+func (s *Service) DefaultRequired() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.defaultRequiredLocked()
+}
+func (s *Service) defaultRequiredLocked() bool {
+	return s.accounts.Default == "" && (s.accountsError != "" || len(s.order) > 1)
+}
+
+// AccountRecovery describes a preference file that was preserved for
+// recovery, or "" when the stored preferences were read normally.
+func (s *Service) AccountRecovery() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.accountsError
+}
+
+// adoptDefaultLocked records the sole verified commander as default when no
+// default exists. Several cached identities stay ambiguous for the launcher;
+// damaged preferences are never replaced automatically.
+func (s *Service) adoptDefaultLocked() {
+	if s.accounts.Default != "" || s.accountsError != "" || len(s.order) != 1 || !validAccountFID(s.order[0]) || s.order[0] == "" {
+		return
+	}
+	next := s.accounts
+	next.Default = s.order[0]
+	if s.persistAccountsLocked(next) == nil {
+		s.accounts = next
+	}
+}
+
+func (s *Service) persistAccountsLocked(next AccountSettings) error {
+	next.Version = accountSettingsVersion
+	if s.opts.StorageDir == "" {
+		return nil
+	}
+	raw, _ := json.Marshal(next)
+	return privatefs.Write(s.opts.StorageDir, accountSettingsFile, raw)
+}
+
 func (s *Service) selectedSummaryLocked() Summary {
 	v := s.summary
 	if fid := s.displayFIDLocked(); fid != s.active {
@@ -56,6 +179,9 @@ func (s *Service) OwnerShipIdentity() map[string]string {
 	}
 	return out
 }
+
+// SetAccounts changes multi-mode and its temporary selection. The persisted
+// default is independent and preserved.
 func (s *Service) SetAccounts(multiple bool, fid string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -63,19 +189,47 @@ func (s *Service) SetAccounts(multiple bool, fid string) error {
 		fid = ""
 	} else {
 		if fid == "" {
-			fid = s.active
+			fid = s.displayFIDLocked()
 		}
 		if _, ok := s.commanders[fid]; !ok || fid == "" {
 			return errors.New("Choose a commander witnessed in verified local journals")
 		}
 	}
-	next := AccountSettings{multiple, fid}
-	raw, _ := json.Marshal(next)
-	if s.opts.StorageDir != "" {
-		if e := privatefs.Write(s.opts.StorageDir, "accounts-v1.json", raw); e != nil {
-			return errors.New("Cannot persist account selection; previous selection retained")
-		}
+	next := s.accounts
+	next.Multiple, next.Selected = multiple, fid
+	return s.applyAccountsLocked(next)
+}
+
+// SetDefaultAccount persists the single-mode default commander. Only a
+// commander witnessed in verified local journals can be chosen.
+func (s *Service) SetDefaultAccount(fid string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.commanders[fid]; !ok || fid == "" || !validAccountFID(fid) {
+		return errors.New("Choose a commander witnessed in verified local journals")
 	}
+	next := s.accounts
+	next.Default = fid
+	if err := s.applyAccountsLocked(next); err != nil {
+		return err
+	}
+	s.accountsError = ""
+	return nil
+}
+
+// RestoreAccounts reinstates previously read settings exactly, for rollback
+// after a failed multi-step account change.
+func (s *Service) RestoreAccounts(prev AccountSettings) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.applyAccountsLocked(prev)
+}
+
+func (s *Service) applyAccountsLocked(next AccountSettings) error {
+	if e := s.persistAccountsLocked(next); e != nil {
+		return errors.New("Cannot persist account selection; previous selection retained")
+	}
+	next.Version = accountSettingsVersion
 	s.accounts = next
 	s.cachedProjection = nil
 	s.views.dirty = true
@@ -90,6 +244,7 @@ type AccountCard struct {
 	ShipType string `json:"shipType"`
 	System   string `json:"system"`
 	Active   bool   `json:"active"`
+	Default  bool   `json:"default"`
 }
 
 func (s *Service) AccountCards() []AccountCard {
@@ -106,7 +261,7 @@ func (s *Service) AccountCards() []AccountCard {
 	}
 	for _, fid := range s.order {
 		ship := s.views.ship.View(fid)
-		out = append(out, AccountCard{fid, names[fid], ship.ShipName, catalog.ShipDisplayName(ship.ShipType), s.commanders[fid].system, fid == s.displayFIDLocked()})
+		out = append(out, AccountCard{fid, names[fid], ship.ShipName, catalog.ShipDisplayName(ship.ShipType), s.commanders[fid].system, fid == s.displayFIDLocked(), fid == s.accounts.Default})
 	}
 	return out
 }

@@ -3,7 +3,6 @@ package webapp
 import (
 	"context"
 	"encoding/json"
-	"github.com/Jakoczig/eridion/go/internal/privatefs"
 	"io"
 	"net/http"
 	"time"
@@ -59,12 +58,16 @@ func (s *Server) startGame(ctx context.Context, opts Options) {
 	if s.g2e {
 		persistentDir = opts.StorageDir
 	}
-	var accounts gamestate.AccountSettings
-	if raw, e := privatefs.Read(opts.StorageDir, "accounts-v1.json"); e == nil {
-		_ = json.Unmarshal(raw, &accounts)
-	}
-	if accounts.Multiple && s.providers != nil {
-		s.providers.PinAccount(accounts.Selected)
+	// Pin the provider namespace to the configured commander before any
+	// journal event can activate another account. A damaged preference pins
+	// nothing; the launcher asks for the default once.
+	accounts, _ := gamestate.LoadAccountSettings(opts.StorageDir)
+	if s.providers != nil {
+		if accounts.Multiple {
+			s.providers.PinAccount(accounts.Selected)
+		} else {
+			s.providers.PinAccount(accounts.Default)
+		}
 	}
 	s.game, _ = gamestate.NewService(gamestate.Options{DisplayAccount: func(fid string, verifiedSingle bool) {
 		if s.remote != nil {

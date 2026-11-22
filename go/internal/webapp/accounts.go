@@ -59,45 +59,60 @@ func (s *Server) accountRPC(ctx context.Context, name string, raw json.RawMessag
 		var q struct {
 			Multiple bool   `json:"multiple"`
 			Selected string `json:"selected"`
+			Default  string `json:"default"`
 		}
 		if strictDecode(raw, &q) != nil {
 			return nil, errors.New("Invalid account selection")
 		}
 		// Verify before touching any credential namespace.
-		found := !q.Multiple
+		found, defaultFound := !q.Multiple, q.Default == ""
 		for _, c := range s.game.AccountCards() {
 			if c.FID == q.Selected {
 				found = true
 			}
+			if c.FID == q.Default {
+				defaultFound = true
+			}
 		}
-		if !found {
+		if !found || !defaultFound {
 			return nil, errors.New("Select a verified local journal account")
 		}
 		previousSettings := s.game.Accounts()
 		confirmedChoice = !q.Multiple || previousSettings.Multiple
+		previousPin := s.game.PinnedAccount()
+		// Pin the target before changing the display so no provider work can
+		// run for an intermediate account.
 		target := q.Selected
 		if !q.Multiple {
-			target = ""
-		}
-		previousPin := ""
-		if previousSettings.Multiple {
-			previousPin = previousSettings.Selected
+			target = q.Default
+			if target == "" {
+				target = previousSettings.Default
+			}
 		}
 		if s.providers != nil {
 			s.providers.PinAccount(target)
 		}
-		if e := s.game.SetAccounts(q.Multiple, q.Selected); e != nil {
+		restore := func() {
+			_ = s.game.RestoreAccounts(previousSettings)
 			if s.providers != nil {
 				s.providers.PinAccount(previousPin)
 			}
+		}
+		if q.Default != "" {
+			if e := s.game.SetDefaultAccount(q.Default); e != nil {
+				restore()
+				return nil, e
+			}
+		}
+		if e := s.game.SetAccounts(q.Multiple, q.Selected); e != nil {
+			restore()
 			return nil, e
 		}
 		if s.providers != nil {
-			s.providers.PinAccount(target)
+			s.providers.PinAccount(s.game.PinnedAccount())
 			if fid := s.game.FieldCommander(); fid != "" {
 				if e := s.providers.ActivateAccount(fid, false); e != nil {
-					_ = s.game.SetAccounts(previousSettings.Multiple, previousSettings.Selected)
-					s.providers.PinAccount(previousPin)
+					restore()
 					return nil, e
 				}
 			}
@@ -110,11 +125,20 @@ func (s *Server) accountRPC(ctx context.Context, name string, raw json.RawMessag
 	}
 	cards := []map[string]any{}
 	for _, c := range s.game.AccountCards() {
-		cards = append(cards, map[string]any{"fid": c.FID, "name": c.Name, "shipName": c.ShipName, "shipType": c.ShipType, "system": c.System, "active": c.Active, "avatar": s.avatarThumbnail(c.FID)})
+		cards = append(cards, map[string]any{"fid": c.FID, "name": c.Name, "shipName": c.ShipName, "shipType": c.ShipType, "system": c.System, "active": c.Active, "default": c.Default, "avatar": s.avatarThumbnail(c.FID)})
 	}
-	return map[string]any{"settings": s.game.Accounts(), "cards": cards, "choiceRequired": s.accountChoiceRequired()}, nil
+	return map[string]any{"settings": s.game.Accounts(), "cards": cards, "choiceRequired": s.accountChoiceRequired(), "defaultRequired": s.game.DefaultRequired(), "recovery": s.game.AccountRecovery() != ""}, nil
 }
 
+// accountChoiceRequired gates opening gameplay displays: multi mode needs a
+// per-launch choice, and an ambiguous or unreadable default needs the
+// one-time launcher setup. Single mode with a default never asks again.
 func (s *Server) accountChoiceRequired() bool {
-	return s.game != nil && s.game.Accounts().Multiple && !s.accountConfirmed.Load()
+	if s.game == nil {
+		return false
+	}
+	if s.game.DefaultRequired() {
+		return true
+	}
+	return s.game.Accounts().Multiple && !s.accountConfirmed.Load()
 }

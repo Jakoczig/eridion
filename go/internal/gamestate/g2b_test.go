@@ -43,6 +43,10 @@ func TestG2BProfileSwitchClearsOldRouteAndBodies(t *testing.T) {
 	waitProjection(t, s, func() bool { return len(s.Navigation().Hops) == 2 && len(s.Exploration().Bodies) == 1 })
 	appendEvent(t, dir, `{"event":"LoadGame","timestamp":"2026-01-01T00:00:09Z","FID":"SYNTHETIC-B"}`)
 	waitState(t, s, func(v Summary) bool { return v.EventsRead == 10 })
+	// The persisted default stays on the first commander; view B explicitly.
+	if e := s.SetAccounts(true, "SYNTHETIC-B"); e != nil {
+		t.Fatal(e)
+	}
 	if n, e := s.Navigation(), s.Exploration(); len(n.Hops) != 0 || len(e.Bodies) != 0 || n.TargetSystem != "" || e.SystemName != "" {
 		t.Fatal("previous commander projections leaked", n, e)
 	}
@@ -208,7 +212,9 @@ func TestG2BMalformedRecordsBreakAttribution(t *testing.T) {
 				t.Fatalf("skipped source record retained trusted attribution: nav=%+v survey=%+v", n, e)
 			}
 			// A complete explicit session and arrival restore trustworthy context.
-			appendEvent(t, dir, `{"event":"LoadGame","timestamp":"2026-01-01T00:00:20Z","FID":"SYNTHETIC-B"}`)
+			// The same commander re-establishes a complete session; a different
+			// commander would not replace the persisted default display.
+			appendEvent(t, dir, `{"event":"LoadGame","timestamp":"2026-01-01T00:00:20Z","FID":"SYNTHETIC-G2B"}`)
 			appendEvent(t, dir, `{"event":"Location","StarSystem":"Fixture Recovered","SystemAddress":7}`)
 			appendEvent(t, dir, `{"event":"FSSDiscoveryScan","BodyCount":7,"Progress":0.5}`)
 			waitProjection(t, s, func() bool {

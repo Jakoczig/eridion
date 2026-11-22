@@ -2,9 +2,7 @@ package gamestate
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"github.com/Jakoczig/eridion/go/internal/privatefs"
 	"os"
 	"strings"
 	"sync"
@@ -65,6 +63,7 @@ type Service struct {
 	startup             journal.Startup
 	needsStartupRebuild bool
 	accounts            AccountSettings
+	accountsError       string
 	legacyPairingFID    string
 	statisticsKey       string
 	statisticsJSON      []byte
@@ -104,13 +103,8 @@ func NewService(opts Options) (*Service, error) {
 	if opts.StorageDir != "" {
 		initialStage = "RESTORING_CACHE"
 	}
-	var accounts AccountSettings
-	if opts.StorageDir != "" {
-		if raw, e := privatefs.Read(opts.StorageDir, "accounts-v1.json"); e == nil {
-			_ = json.Unmarshal(raw, &accounts)
-		}
-	}
-	return &Service{accounts: accounts, maintenance: make(chan maintenanceRequest), navigationContext: navcontext.New(), views: newProjectionState(), opts: opts, summary: Summary{Stage: initialStage, SourceState: "waiting", ImportInProgress: true}, details: SourceDetails{Override: opts.Directory, Sidecars: map[string]string{}}, commanders: map[string]commanderState{}, subscribers: map[chan Summary]struct{}{}, selectSource: make(chan selection), done: make(chan struct{})}, nil
+	accounts, accountsError := loadAccountsForService(opts.StorageDir)
+	return &Service{accounts: accounts, accountsError: accountsError, maintenance: make(chan maintenanceRequest), navigationContext: navcontext.New(), views: newProjectionState(), opts: opts, summary: Summary{Stage: initialStage, SourceState: "waiting", ImportInProgress: true}, details: SourceDetails{Override: opts.Directory, Sidecars: map[string]string{}}, commanders: map[string]commanderState{}, subscribers: map[chan Summary]struct{}{}, selectSource: make(chan selection), done: make(chan struct{})}, nil
 }
 func (s *Service) Snapshot() Summary {
 	s.mu.Lock()
@@ -260,6 +254,7 @@ func (s *Service) Run(ctx context.Context) error {
 				e = s.restoreCacheLocked(raw)
 				if e == nil {
 					s.restored = true
+					s.adoptDefaultLocked()
 					s.summary.Cached = true
 					s.summary.Stage = "CATCHING_UP"
 					savedSummary := s.summary
@@ -486,6 +481,11 @@ func (s *Service) Run(ctx context.Context) error {
 			} else {
 				s.summary.ImportInProgress = false
 			}
+			if !s.summary.ImportInProgress {
+				// History is complete: adopt a default only if exactly one
+				// verified commander exists, never by import order.
+				s.adoptDefaultLocked()
+			}
 			if s.store != nil && s.databaseError == "" {
 				if s.summary.ImportInProgress {
 					if s.restored {
@@ -558,6 +558,9 @@ func (s *Service) applyEventLocked(event journal.Event, phase journal.Phase) {
 				}
 				s.order = append(s.order, s.active)
 				s.commanders[s.active] = commanderState{}
+				if phase == journal.Live && !s.summary.ImportInProgress {
+					s.adoptDefaultLocked() // first verified live identity
+				}
 			}
 		}
 	case "Location", "FSDJump", "CarrierJump":
