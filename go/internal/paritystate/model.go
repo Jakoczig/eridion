@@ -67,6 +67,14 @@ func (m *Model) get(key string) *state {
 	m.order = append(m.order, key)
 	return s
 }
+// Status returns a detached Status view without cloning the full parity
+// view (modules, cargo, inventory and materials).
+func (m *Model) Status(key string) StatusView {
+	if s := m.states[key]; s != nil {
+		return cloneStatus(s.v.Status)
+	}
+	return blank().Status
+}
 func (m *Model) View(key string) View {
 	if s := m.states[key]; s != nil {
 		return Clone(s.v)

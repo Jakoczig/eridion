@@ -152,7 +152,7 @@ func (s *Service) sidecarProjectionLocked(c sidecar.Change) {
 	if s.opts.EnableParity {
 		s.views.parity.ApplySidecar(s.active, c)
 		if c.Kind == "Status" && !s.summary.ImportInProgress && s.summary.SourceState == "live" {
-			s.navigationContext.Status(s.active, s.views.parity.View(s.active).Status)
+			s.navigationContext.Status(s.active, s.views.parity.Status(s.active))
 		}
 		s.views.dirty = true
 	}

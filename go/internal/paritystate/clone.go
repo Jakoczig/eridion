@@ -59,13 +59,19 @@ func Clone(v View) View {
 	}
 	v.Inventory.Items = copySlice(v.Inventory.Items)
 	v.Materials.Items = copySlice(v.Materials.Items)
-	v.Status.Flags = copyPtr(v.Status.Flags)
-	v.Status.Flags2 = copyPtr(v.Status.Flags2)
-	v.Status.Pips = copyPtr(v.Status.Pips)
-	v.Status.FuelMainT = copyPtr(v.Status.FuelMainT)
-	v.Status.FuelReservoirT = copyPtr(v.Status.FuelReservoirT)
-	v.Status.CargoT = copyPtr(v.Status.CargoT)
-	v.Status.Temperature = copyPtr(v.Status.Temperature)
-	v.Status.GuiFocus = copyPtr(v.Status.GuiFocus)
+	v.Status = cloneStatus(v.Status)
+	return v
+}
+
+// cloneStatus detaches every pointer field of a Status view.
+func cloneStatus(v StatusView) StatusView {
+	v.Flags = copyPtr(v.Flags)
+	v.Flags2 = copyPtr(v.Flags2)
+	v.Pips = copyPtr(v.Pips)
+	v.FuelMainT = copyPtr(v.FuelMainT)
+	v.FuelReservoirT = copyPtr(v.FuelReservoirT)
+	v.CargoT = copyPtr(v.CargoT)
+	v.Temperature = copyPtr(v.Temperature)
+	v.GuiFocus = copyPtr(v.GuiFocus)
 	return v
 }
