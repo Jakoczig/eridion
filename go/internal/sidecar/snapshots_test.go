@@ -141,3 +141,75 @@ func TestSidecarInvalidUTF8PreservesGoodSnapshot(t *testing.T) {
 		t.Fatal("corrupt snapshot replaced cache")
 	}
 }
+
+func TestPerfSidecarVerifiedReuse(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Status.json")
+	writeSnapshot(t, dir, "Status", `{"timestamp":"2026-11-22T10:00:00Z","event":"Status","Flags":1}`)
+	r, _ := NewReader(dir, Options{})
+	changes, _ := r.Poll(context.Background())
+	if c := findChange(changes, "Status"); c == nil || !c.Valid {
+		t.Fatal("initial snapshot not read", changes)
+	}
+	start := r.decodes
+	for i := 0; i < 5; i++ {
+		if changes, _ = r.Poll(context.Background()); len(changes) != 0 {
+			t.Fatal("unchanged snapshot re-emitted", changes)
+		}
+	}
+	if r.decodes != start {
+		t.Fatalf("unchanged verified content decoded %d more times", r.decodes-start)
+	}
+	// Same size and restored mtime but different bytes: content is still
+	// hashed, so the change is detected.
+	info, _ := os.Stat(path)
+	writeSnapshot(t, dir, "Status", `{"timestamp":"2026-11-22T10:00:00Z","event":"Status","Flags":2}`)
+	os.Chtimes(path, info.ModTime(), info.ModTime())
+	changes, _ = r.Poll(context.Background())
+	if c := findChange(changes, "Status"); c == nil || !strings.Contains(string(c.Raw), `"Flags":2`) {
+		t.Fatal("same-size rewrite not detected", changes)
+	}
+	// Identical bytes rewritten: no decode, no duplicate.
+	before := r.decodes
+	writeSnapshot(t, dir, "Status", `{"timestamp":"2026-11-22T10:00:00Z","event":"Status","Flags":2}`)
+	if changes, _ = r.Poll(context.Background()); len(changes) != 0 || r.decodes != before {
+		t.Fatal("identical rewrite decoded or re-emitted", changes, r.decodes-before)
+	}
+	// Malformed keeps last good; returning to valid bytes is a real state
+	// transition that is emitted again (one decode: the cache holds only the
+	// latest read per kind).
+	writeSnapshot(t, dir, "Status", `{"timestamp":`)
+	changes, _ = r.Poll(context.Background())
+	if c := findChange(changes, "Status"); c == nil || c.Valid || !strings.Contains(string(r.LastGood("Status").Raw), `"Flags":2`) {
+		t.Fatal("malformed snapshot replaced last good", changes)
+	}
+	before = r.decodes
+	writeSnapshot(t, dir, "Status", `{"timestamp":"2026-11-22T10:00:00Z","event":"Status","Flags":2}`)
+	changes, _ = r.Poll(context.Background())
+	c := findChange(changes, "Status")
+	if c == nil || !c.Valid || r.decodes != before+1 {
+		t.Fatal("recovery to valid content not emitted once", changes, r.decodes-before)
+	}
+	c.Raw[0] = '!'
+	if r.LastGood("Status").Raw[0] != '{' {
+		t.Fatal("emitted change shares cached bytes")
+	}
+	again, _, _ := r.read("Status")
+	if again.Raw[0] != '{' {
+		t.Fatal("caller mutation reached the verified cache")
+	}
+	// Missing then reappearing.
+	os.Remove(path)
+	if changes, _ = r.Poll(context.Background()); findChange(changes, "Status") == nil || findChange(changes, "Status").State != "missing" {
+		t.Fatal("missing not reported", changes)
+	}
+	writeSnapshot(t, dir, "Status", `{"timestamp":"2026-11-22T10:00:00Z","event":"Status","Flags":2}`)
+	if changes, _ = r.Poll(context.Background()); findChange(changes, "Status") == nil || !findChange(changes, "Status").Valid {
+		t.Fatal("reappearing snapshot not reported", changes)
+	}
+	// A verified but older timestamp remains stale against last good.
+	writeSnapshot(t, dir, "Status", `{"timestamp":"2026-11-22T09:00:00Z","event":"Status","Flags":3}`)
+	if changes, _ = r.Poll(context.Background()); findChange(changes, "Status") == nil || findChange(changes, "Status").State != "stale" {
+		t.Fatal("stale snapshot not classified", changes)
+	}
+}
