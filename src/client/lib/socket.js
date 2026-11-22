@@ -147,15 +147,18 @@ async function connect (socketState, setSocketState) {
   if (process.env.NODE_ENV === 'development') devLog('[SOCKET] Connecting to service')
   socket.onmessage = (event) => {
     if (!current()) return
-    let requestId, name, message
+    let envelope
     try {
-      ({ requestId, name, message } = JSON.parse(event.data))
+      envelope = JSON.parse(event.data)
     } catch (e) {
       console.error('Failed to parse socket message:', e)
       return
     }
-    // Invoke callback to handler (if there is one)
-    if (requestId && callbackHandlers[requestId]) callbackHandlers[requestId](event, setSocketState)
+    if (!envelope || typeof envelope !== 'object') return
+    const { requestId, name, message } = envelope
+    // Invoke callback to handler (if there is one) with the decoded envelope;
+    // each frame is parsed exactly once.
+    if (requestId && callbackHandlers[requestId]) callbackHandlers[requestId](envelope, setSocketState)
 
     // Updating resync whern loading completes tells any components to resync
     // with the server. it is useful for remote clients that disconnects then
@@ -191,10 +194,7 @@ async function connect (socketState, setSocketState) {
         broadcastActivityTimeout = setTimeout(() => {
           broadcastActivityTimeout = null
           recentBroadcastEvents = 0
-          setSocketState(prevState => ({
-            ...prevState,
-            active: socketRequestsPending()
-          }))
+          updateActivity(setSocketState)
         }, 500)
       }
 
@@ -336,10 +336,7 @@ async function connect (socketState, setSocketState) {
       const { requestId, name, message } = deferredEventQueue[0]
       try {
         socket.send(JSON.stringify({ requestId, name, message }))
-        setSocketState(prevState => ({
-          ...prevState,
-          active: socketRequestsPending()
-        }))
+        updateActivity(setSocketState)
         deferredEventQueue.shift() // Remove message from queue once delivered
         socketDebugMessage('Queued message sent to socket server', requestId, name, message)
       } catch (e) {
@@ -518,15 +515,11 @@ function sendEvent (name, message = null, timeout = 30000) {
     const sendStart = (process.env.NODE_ENV === 'development') ? Date.now() : 0
     if (process.env.NODE_ENV === 'development') devLog(`[SEND] → ${name}  id=${requestId.slice(0, 8)}`)
     let timer = null
-    callbackHandlers[requestId] = (event, setSocketState) => {
+    callbackHandlers[requestId] = (parsed, setSocketState) => {
       if (timer) clearTimeout(timer)
-      const parsed = JSON.parse(event.data)
       delete callbackHandlers[requestId]
       if (process.env.NODE_ENV === 'development') devLog(`[SEND] ← ${name}  id=${requestId.slice(0, 8)}  ${Date.now() - sendStart}ms`)
-      setSocketState(prevState => ({
-        ...prevState,
-        active: socketRequestsPending()
-      }))
+      updateActivity(setSocketState)
       if (parsed.error) {
         reject(new Error(parsed.error))
       } else {
@@ -554,6 +547,16 @@ function eventListener (eventName, callback) {
   const eventHandler = (e) => { callback(e.detail) }
   window.addEventListener(`socketEvent_${eventName}`, eventHandler)
   return () => window.removeEventListener(`socketEvent_${eventName}`, eventHandler)
+}
+
+// updateActivity keeps the previous state object when the computed activity
+// flag is unchanged, so unrelated socket traffic does not rerender every
+// consumer of the socket context.
+function updateActivity (setSocketState) {
+  setSocketState(prevState => {
+    const active = socketRequestsPending()
+    return prevState.active === active ? prevState : { ...prevState, active }
+  })
 }
 
 function socketRequestsPending () {
