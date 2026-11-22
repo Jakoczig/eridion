@@ -34,7 +34,7 @@ func normalizeCAPISnapshot(kind, fid string, data map[string]any, now time.Time)
 			}
 			goals = append(goals, map[string]any{"id": capiID(v["id"]), "title": capiText(v["title"], 256), "objective": capiText(v["objective"], 512), "system": capiText(v["starsystem_name"], 128), "station": capiText(v["market_name"], 128), "expiry": capiText(v["expiry"], 80), "activityType": capiText(v["activityType"], 80), "globalTotal": capiAmount(v["qty"]), "targetTotal": capiAmount(v["target_qty"])})
 		}
-		x.Fields["communityGoals"] = map[string]any{"global": goals, "personalParticipationVerified": false, "notice": "Global goal reference. This verified response contains no commander participation/contribution fields. Journal subscription, contribution and received rewards remain authoritative."}
+		x.Fields["communityGoals"] = map[string]any{"global": goals, "personalParticipationVerified": false, "notice": "Global goal reference. This verified response contains no commander participation/contribution fields, so subscription, contribution and received rewards come from the journal."}
 	case "market":
 		entries, ok := data["commodities"].([]any)
 		if !ok || len(entries) > 2048 || capiID(data["id"]) == "" {

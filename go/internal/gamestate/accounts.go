@@ -287,6 +287,23 @@ func (s *Service) CommanderOverview(ctx context.Context) (map[string]any, error)
 		return nil, e
 	}
 	out["facts"] = facts
+	// D0: ranks and current ship identity come from the same resolver as every
+	// other commander fact; the journal view is only the fallback.
+	out["ranks"] = history.ResolveRanks(facts)
+	out["identitySource"] = "journal"
+	if ship, ok := history.ResolveCurrentShip(facts); ok {
+		out["identitySource"] = ship.Source
+		out["identityFetchedAt"] = ship.FetchedAt
+		if ship.Name != "" {
+			out["shipName"] = ship.Name
+		}
+		if ship.Model != "" {
+			out["shipType"] = catalog.ShipDisplayName(ship.Model)
+		}
+		if ship.SystemName != "" {
+			out["system"] = ship.SystemName
+		}
+	}
 	fleet, e := s.store.ReconciledFleetCount(ctx, fid, facts)
 	if e != nil {
 		return nil, e

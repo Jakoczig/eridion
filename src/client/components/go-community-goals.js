@@ -4,6 +4,9 @@ const fields = r => r?.details?.fields || r?.details || {}
 const amount = v => { if (v == null || v === '') return null; try { return BigInt(v).toLocaleString() } catch { return String(v) } }
 const date = v => { const d = new Date(v); return Number.isNaN(d.getTime()) ? 'Not reported' : d.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) }
 export function goalCards (page) {
+  // D0: fresh validated Frontier first, journal second. Totals and metadata
+  // fall back field by field; only verified personal Frontier fields may
+  // replace the journal contribution, and global data never creates membership.
   const source = (page?.reference || []).filter(f => f.field === 'communityGoals').flatMap(f => [f, ...(f.alternatives || [])]).find(f => f.source === 'frontier')
   const global = source?.value?.global || []
   const ids = new Set((page?.goalMembership?.ids || []).map(String))
@@ -11,9 +14,9 @@ export function goalCards (page) {
   return [...ids].slice(0, 256).map(id => {
     const records = (page?.current || []).filter(r => r.entity === id)
     const progress = records.find(r => r.title === 'progress_snapshot'); const local = fields(progress)
-    const remote = global.find(g => g.id === id); const fresh = remote && !source.stale
+    const remote = global.find(g => g.id === id); const fresh = remote && !source.stale && source.eligible !== false; const personal = fresh && source.value?.personalParticipationVerified === true
     const prefer = (key, fallback) => fresh && remote[key] != null && remote[key] !== '' ? remote[key] : fallback ?? remote?.[key]
-    return { id, title: prefer('title', local.Title) || 'Community Goal', system: prefer('system', local.SystemName), station: prefer('station', local.MarketName), objective: prefer('objective', local.Objective), total: prefer('globalTotal', local.CurrentTotal), target: remote?.targetTotal, expiry: prefer('expiry', local.Expiry), contribution: local.PlayerContribution ?? null, band: local.PlayerPercentileBand ?? null, tier: local.TierReached ?? null, contributors: local.NumContributors ?? null, complete: local.IsComplete, subscribed: page?.goalMembership?.ids?.includes(id) === true, bonus: local.Bonus, reward: fields(records.find(r => r.title === 'reward_received')).Reward, remote: !!remote, stale: source?.stale, fetched: source?.fetchedAt, observed: progress?.at }
+    return { id, title: prefer('title', local.Title) || 'Community Goal', system: prefer('system', local.SystemName), station: prefer('station', local.MarketName), objective: prefer('objective', local.Objective), total: prefer('globalTotal', local.CurrentTotal), target: remote?.targetTotal, expiry: prefer('expiry', local.Expiry), contribution: (personal && remote.playerContribution != null && remote.playerContribution !== '' ? remote.playerContribution : local.PlayerContribution) ?? null, band: local.PlayerPercentileBand ?? null, tier: local.TierReached ?? null, contributors: local.NumContributors ?? null, complete: local.IsComplete, subscribed: page?.goalMembership?.ids?.includes(id) === true, bonus: local.Bonus, reward: fields(records.find(r => r.title === 'reward_received')).Reward, remote: !!remote, stale: source?.stale, fetched: source?.fetchedAt, observed: progress?.at }
   })
 }
 export default function GoCommunityGoals ({ page, role, sendEvent, onRefresh }) {
