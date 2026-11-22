@@ -10,7 +10,7 @@ export async function searchSystem (sendEvent, query, role) {
   const name = query.trim()
   if (!name) return null
   const cached = await sendEvent('getGoSystem', { name })
-  if (cached.point?.name || (cached.availability && cached.availability !== 'unavailable') || role !== 'owner' || !cached.community?.enabled) return cached
+  if (cached.point?.name || (cached.availability && cached.availability !== 'unavailable') || !cached.community?.enabled) return cached
   return sendEvent('lookupGoSystem', { name })
 }
 // XYZ controls adjust the inspected data volume, never the camera.

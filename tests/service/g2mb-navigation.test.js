@@ -20,15 +20,15 @@ test('native primary navigation hides Controls without changing legacy navigatio
   legacy.props.native = true
   assert.doesNotMatch(legacy.html(), /Controls/)
 })
-test('context activity requires owner and does not enumerate or choose the first commander', async () => {
+test('context activity is equal on trusted displays and does not enumerate or choose the first commander', async () => {
   const h = harness('go-field-operations', [], 'BGSTally')
   h.props.context = 'missions'
-  assert.match(h.html(), /read-only/)
+  assert.doesNotMatch(h.html(), /read-only|local owner/)
   await h.flush()
-  assert.equal(h.calls.length, 0)
+  assert.deepEqual(h.calls, ['getGoBGSTally'])
   h.props.role = 'owner'
   h.html(); await h.flush()
-  assert.ok(h.calls.includes('getGoBGSTally'))
+  assert.ok(h.calls.every(n => n === 'getGoBGSTally'))
   assert.ok(!h.calls.includes('getGoDataStatus'))
   h.unmount()
 })
@@ -47,13 +47,12 @@ test('Commander Overview and Session do not mount or query the activity ledger f
     }
   }
 })
-test('complete commander activity is absent until an owner explicitly opens it', () => {
+test('complete commander activity is absent until a display explicitly opens it', () => {
   for (const role of ['owner', 'viewer']) {
     const h = harness('go-field-operations', [], 'PrivateCommanderActivity'); h.props.role = role
     const html = h.html(); assert.doesNotMatch(html, /go-context-activity|Export selected activity CSV/)
     assert.equal(h.calls.length, 0)
-    if (role === 'viewer')assert.equal(html, '')
-    else { const d = h.elements('details')[0]; assert.equal(d.props.open, undefined); d.props.onToggle({ currentTarget: { open: true } }); assert.match(h.html(), /Commander activity/) }
+    const d = h.elements('details')[0]; assert.equal(d.props.open, undefined); d.props.onToggle({ currentTarget: { open: true } }); assert.match(h.html(), /Commander activity/)
     h.unmount()
   }
 })

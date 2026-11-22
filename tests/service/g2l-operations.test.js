@@ -43,9 +43,11 @@ function harness (panel = 'go-operations', initial = {}) {
   }
 }
 
-test('G2L viewer screens do not request private operations or providers', async () => {
+// D1: a paired display reads the same bounded operations as the main display
+// and never calls the launcher provider RPC.
+test('G2L paired display uses the same bounded operations reads as the main display', async () => {
   const h = harness(); h.props.path = '/ship/fleet'; h.props.connected = true; h.props.ready = true
-  assert.match(h.html(), /LOCAL OWNER ONLY/); await h.flush(); assert.deepEqual(h.calls, [])
+  try { assert.doesNotMatch(h.html(), /LOCAL OWNER ONLY/); await h.flush(); assert.ok(h.calls.includes('getGoOperations')); assert.ok(!h.calls.includes('getGoProviders')) } finally { h.unmount() }
 })
 test('G2L owner uses only bounded local reads, preserves exact IDs and stops after unmount', async () => {
   const h = harness('go-operations', { rows: [{ id: '1', entity: '18446744073709551615', title: 'Fixture Explorer', at: '2026-01-01', state: 'last_known', kind: 'Fleet', details: { shipName: 'Fixture Explorer', modelLabel: 'Asp Explorer', Value: '9007199254740993' } }], next: '', notice: 'Observed journal' })

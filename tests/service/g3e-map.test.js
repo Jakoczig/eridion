@@ -15,14 +15,16 @@ test('fixed panel layout and padded common frame preserve all axis scales', () =
     assert.match(h.html(), /preserveAspectRatio="xMidYMid meet"/)
   } finally { h.unmount() }
 })
-test('search is local first and never requests external data for viewers or disabled consent', async () => {
+// D1: an explicit lookup is the same on paired and main displays; disabled
+// consent still prevents external requests.
+test('search is local first and never requests external data with disabled consent', async () => {
   const h = harness('go-unified-galaxy', {})
   try {
     const calls = []
     const send = async name => { calls.push(name); return name === 'getGoSystem' ? { point: {}, community: { enabled: true } } : { point: { name: 'Found', coordinates: [1, 2, 3] } } }
     await h.exports.searchSystem(send, 'Target', 'owner')
     assert.deepEqual(calls, ['getGoSystem', 'lookupGoSystem'])
-    calls.length = 0; await h.exports.searchSystem(send, 'Target', 'viewer'); assert.deepEqual(calls, ['getGoSystem'])
+    calls.length = 0; await h.exports.searchSystem(send, 'Target', 'viewer'); assert.deepEqual(calls, ['getGoSystem', 'lookupGoSystem'])
     calls.length = 0; await h.exports.searchSystem(send, '   ', 'owner'); assert.deepEqual(calls, [])
     calls.length = 0; await h.exports.searchSystem(async name => { calls.push(name); return { point: {}, availability: 'unavailable', community: { enabled: false } } }, 'Unknown', 'owner'); assert.deepEqual(calls, ['getGoSystem'])
     calls.length = 0; await h.exports.searchSystem(async name => { calls.push(name); return { point: { name: 'Known' }, community: { enabled: true } } }, 'Known', 'owner'); assert.deepEqual(calls, ['getGoSystem'])

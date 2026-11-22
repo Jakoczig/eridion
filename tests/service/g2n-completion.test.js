@@ -16,7 +16,7 @@ test('goal cards join exact Frontier IDs without inventing participation and pre
 test('Community Goals has one owner-controlled Frontier refresh and no export or automatic online request', async () => {
   const h = harness('go-community-goals', () => ({ rows: [] }))
   Object.assign(h.props, { role: 'owner', page: { goalMembership: { known: true, ids: [] }, rows: [] } })
-  try { const html = h.html(); await h.flush(); assert.match(html, /Refresh Frontier goals/); assert.doesNotMatch(html, /export|commander select|local journal observation/i); assert.ok(h.calls.every(n => n === 'getGoProviders')) } finally { h.unmount() }
+  try { const html = h.html(); await h.flush(); assert.match(html, /Refresh Frontier goals/); assert.doesNotMatch(html, /export|commander select|local journal observation/i); assert.ok(h.calls.every(n => n === 'getGoProviderGameplay')) } finally { h.unmount() }
 })
 
 test('Fleet has owned/sold filters, exact value formatting and bounded pagination controls', () => {

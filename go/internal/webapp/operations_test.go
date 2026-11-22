@@ -9,17 +9,21 @@ import (
 	"time"
 )
 
-func TestG2LViewerCannotReadFleetFinanceTransactionsCrewOrExport(t *testing.T) {
+// D1: operations reads and previewed exports are gameplay on every trusted
+// display; source backfill is launcher maintenance.
+func TestG2LPairedOperationsMatchMainDisplay(t *testing.T) {
 	_, _, viewer, url, _ := g2eFixture(t)
 	c := pairedSocket(t, viewer, url)
 	defer c.CloseNow()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	for _, name := range []string{"getGoOperations", "exportGoOperations", "backfillGoOperationsSource"} {
-		r := callRPC(t, ctx, c, name)
-		if string(r["error"]) != `"Local owner required"` {
-			t.Fatalf("must be rejected before decoding private query: %s %s", name, r["error"])
+	for _, name := range []string{"getGoOperations", "exportGoOperations"} {
+		if r := callRPC(t, ctx, c, name); strings.Contains(string(r["error"]), "owner") || string(r["error"]) == `"`+launcherOnlyError+`"` {
+			t.Fatalf("paired display denied %s: %s", name, r["error"])
 		}
+	}
+	if r := callRPC(t, ctx, c, "backfillGoOperationsSource"); string(r["error"]) != `"`+launcherOnlyError+`"` {
+		t.Fatalf("paired display reached launcher maintenance: %s", r["error"])
 	}
 }
 

@@ -29,13 +29,13 @@ test('native Trade root renders usable comparison and preserves explicit subpage
   }
 })
 
-test('Local Activity is implemented for owners and never mounts private history for viewers', async () => {
+test('Local Activity is equal on trusted displays and mounts private history only when opened', async () => {
   for (const role of ['owner', 'viewer']) {
     const h = harness('go-terminal', () => ({})); Object.assign(h.props, { path: '/missions/local-activity', stage: 'G2E', role })
     try {
       const html = h.html(); assert.doesNotMatch(html, /has not been migrated/)
-      if (role === 'owner') assert.match(html, /Private commander activity/)
-      else assert.doesNotMatch(html, /go-private-activity|go-context-activity/)
+      assert.match(html, /Private commander activity/)
+      assert.doesNotMatch(html, /go-context-activity/)
       await h.flush(); assert.ok(!h.calls.includes('getGoBGSTally'), 'private ledger queried without explicit owner open')
     } finally { h.unmount() }
   }

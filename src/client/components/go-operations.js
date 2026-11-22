@@ -35,14 +35,13 @@ export default function GoOperations (props) {
   useEffect(() => {
     let active = true; let pending = false; let timer
     setPage(null); setPreview(null); setAck(false)
-    if (props.role === 'owner' && props.connected && props.ready && kind !== 'external') {
+    if (props.connected && props.ready && kind !== 'external') {
       const load = async () => { if (pending) return; pending = true; try { const value = await props.sendEvent('getGoOperations', JSON.parse(query)); if (active) { setPage(value); setNotice('') } } catch (e) { if (active) setNotice('Operations unavailable; journal history retained.') } finally { pending = false } }
       load(); timer = setInterval(load, 3000)
     }
     return () => { active = false; clearInterval(timer) }
-  }, [props.role, props.connected, props.ready, props.sendEvent, query, revision, kind])
+  }, [props.connected, props.ready, props.sendEvent, query, revision, kind])
   const change = setter => event => { setter(event.target.value); setBefore(''); setPreview(null); setAck(false) }
-  if (props.role !== 'owner') return <section className='go-page'><h2>{title}</h2><Badge>LOCAL OWNER ONLY</Badge><p>Fleet, carrier finances, prices, transactions and other commanders’ names are private. Paired displays remain read-only; this private history is not transmitted.</p></section>
   if (initial === 'external') return <section className='go-page'><h2>{title}</h2><p>External community reference only. DAEDALUS has no verified consumable PTN/FCOC feed. No scraping or automatic external request.</p><a href={props.path.endsWith('/ptn') ? 'https://pilotstradenetwork.com/' : 'https://inara.cz/elite/squadron/7636/'} target='_blank' rel='noreferrer'>Open community website</a></section>
   if (!props.connected || !props.ready) return <p role='status'>Operations disconnected. Waiting for authenticated recovery.</p>
   if (initial === 'goals') return <GoCommunityGoals {...props} page={page} onRefresh={() => setRevision(v => v + 1)} />
