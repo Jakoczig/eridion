@@ -13,18 +13,19 @@ import (
 )
 
 type OperationQuery struct {
-	FleetAfter  int    `json:"fleetAfter"`
-	FleetState  string `json:"fleetState"`
-	PreviewHash string `json:"previewHash"`
-	Kind        string `json:"kind"`
-	FID         string `json:"fid"`
-	ID          string `json:"id"`
-	Before      string `json:"before"`
-	Commodity   string `json:"commodity"`
-	Market      string `json:"market"`
-	OtherMarket string `json:"otherMarket"`
-	Limit       int    `json:"limit"`
-	Acknowledge bool   `json:"acknowledge"`
+	FleetAfter    int    `json:"fleetAfter"`
+	FleetState    string `json:"fleetState"`
+	FleetRevision string `json:"fleetRevision"`
+	PreviewHash   string `json:"previewHash"`
+	Kind          string `json:"kind"`
+	FID           string `json:"fid"`
+	ID            string `json:"id"`
+	Before        string `json:"before"`
+	Commodity     string `json:"commodity"`
+	Market        string `json:"market"`
+	OtherMarket   string `json:"otherMarket"`
+	Limit         int    `json:"limit"`
+	Acknowledge   bool   `json:"acknowledge"`
 }
 type OperationRow struct {
 	ID      string          `json:"id"`
@@ -37,6 +38,11 @@ type OperationRow struct {
 }
 type OperationPage struct {
 	FleetNext      int               `json:"fleetNext,omitempty"`
+	FleetTotal     int               `json:"fleetTotal"`
+	FleetMatched   int               `json:"fleetMatched"`
+	FleetCoverage  string            `json:"fleetCoverage,omitempty"`
+	FleetRevision  string            `json:"fleetRevision,omitempty"`
+	FleetRestarted bool              `json:"fleetRestarted,omitempty"`
 	GoalMembership *GoalMembership   `json:"goalMembership,omitempty"`
 	PreviewHash    string            `json:"previewHash"`
 	Totals         map[string]string `json:"totals,omitempty"`
@@ -59,7 +65,7 @@ func (s *Store) Operations(ctx context.Context, fid string, q OperationQuery) (O
 		q.Limit = 50
 	}
 	before := q.Before
-	if q.FleetAfter < 0 || q.FleetAfter > 512 || (q.FleetAfter > 0 && (q.Kind != "fleet" || q.Before != "")) {
+	if q.FleetAfter < 0 || q.FleetAfter > maxFleetRows+512 || len(q.FleetRevision) > 64 || (q.FleetAfter > 0 && (q.Kind != "fleet" || q.Before != "")) {
 		return out, errors.New("Invalid fleet cursor")
 	}
 	if before == "" {
@@ -77,8 +83,7 @@ func (s *Store) Operations(ctx context.Context, fid string, q OperationQuery) (O
 		if q.FleetState != "" && q.FleetState != "owned" && q.FleetState != "sold" && q.FleetState != "in_transit" {
 			return out, errors.New("Unsupported fleet filter")
 		}
-		query = `SELECT cast(rowid AS TEXT),ship_id,'Fleet',observed_at,state,model||' '||name,json_set(metadata_json,'$.system',system_name,'$.marketId',market_id,'$.model',model,'$.shipName',name) FROM fleet_ships WHERE commander_fid=? AND rowid<cast(? AS INTEGER) AND (?='' OR model LIKE '%'||?||'%' OR name LIKE '%'||?||'%') AND (?='' OR (?='owned' AND state<>'sold') OR state=?) ORDER BY rowid DESC LIMIT ?`
-		args = []any{fid, before, q.Commodity, q.Commodity, q.Commodity, q.FleetState, q.FleetState, q.FleetState, q.Limit + 1}
+		// Served by fleetPage from the single resolved inventory.
 	case "loadouts":
 		query = `SELECT cast(id AS TEXT),ship_id,'Loadout',coalesce(observed_at,''),'historical_witnessed','Exact witnessed fitted modules',raw_json FROM ship_loadout_snapshots WHERE commander_fid=? AND ship_id=? AND id<cast(? AS INTEGER) ORDER BY id DESC LIMIT ?`
 		args = []any{fid, q.ID, before, q.Limit + 1}
@@ -136,6 +141,9 @@ func (s *Store) Operations(ctx context.Context, fid string, q OperationQuery) (O
 	if !s.BuiltinEnabled(module) {
 		out.Notice = "Built-in module disabled; history retained"
 		return out, nil
+	}
+	if q.Kind == "fleet" {
+		return s.fleetPage(ctx, fid, q, out)
 	}
 	rows, e := s.reader.QueryContext(ctx, query, args...)
 	if e != nil {
@@ -196,7 +204,7 @@ func (s *Store) Operations(ctx context.Context, fid string, q OperationQuery) (O
 			out.Totals[k] = v.String()
 		}
 	}
-	if q.Kind == "fleet" || q.Kind == "goals" || q.Kind == "squadron" || q.Kind == "carrier" || q.Kind == "markets" || q.Kind == "commodities" {
+	if q.Kind == "goals" || q.Kind == "squadron" || q.Kind == "carrier" || q.Kind == "markets" || q.Kind == "commodities" {
 		out.Reference, _ = s.EffectiveFacts(ctx, fid, "commander", time.Now())
 	}
 	members := map[string]bool{}
@@ -251,11 +259,6 @@ func (s *Store) Operations(ctx context.Context, fid string, q OperationQuery) (O
 		current.Close()
 		if err != nil {
 			return out, err
-		}
-	}
-	if q.Kind == "fleet" {
-		if e := s.supplementFrontierFleet(ctx, fid, q, &out); e != nil {
-			return out, e
 		}
 	}
 	if q.Kind == "carrier" && len(out.Rows) == 0 {

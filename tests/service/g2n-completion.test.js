@@ -21,7 +21,7 @@ test('Community Goals has one owner-controlled Frontier refresh and no export or
 
 test('Fleet has owned/sold filters, exact value formatting and bounded pagination controls', () => {
   const h = harness('go-fleet'); Object.assign(h.props, { page: { rows: [{ id: '1', entity: '1', state: 'known_active', details: { shipName: 'Fixture Ship', modelLabel: 'Asp Explorer', Value: '9007199254740993' } }, { id: '2', entity: '2', state: 'sold', details: { shipName: 'SOLD FIXTURE' } }], next: '2' } })
-  try { const html = h.html(); assert.match(html, /Fixture Ship/); assert.doesNotMatch(html, /SOLD FIXTURE/); assert.match(html, /Fleet view/); assert.match(html, /Older ships/) } finally { h.unmount() }
+  try { const html = h.html(); assert.match(html, /Fixture Ship/); assert.doesNotMatch(html, /SOLD FIXTURE/); assert.match(html, /Fleet view/); assert.match(html, /More ships/) } finally { h.unmount() }
 })
 
 test('activity groups never add influence ratings or mix award and redemption', () => {
