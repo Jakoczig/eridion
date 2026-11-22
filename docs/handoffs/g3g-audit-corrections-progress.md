@@ -78,6 +78,16 @@ Local baseline at `6bc4a3c` before any change: `npm ci`, `lint:security`, `lint:
 | Flake `TestG2MCStartupSurvivesRestartAndUpgradesLegacyCache` | targeted checks passed | `dbe3de1` | Root cause: restoring a cache that needs a startup rebuild installed the cached summary (`ImportInProgress=false`, `EventsRead=10`) and released the lock before `rebuildDerived` marked the import again; observers saw a "complete" import with empty startup projections. Fixed by reporting the rebuild as an import before releasing the lock. Deterministic regression via a nil-by-default hook in the former gap: `TestG2MCLegacyCacheRebuildNeverLooksComplete` fails without the fix. Locally the original flake did not reproduce (0/120 `-race` runs before the fix); 30 `-race` repetitions of both tests pass after it. |
 | Task 11 (baseline only) | measured (baseline) | see git log | See `docs/testing/g3g-native-performance.md`. No candidate comparison, no improvement claims. |
 
+| Task 5 follow-up (journal ranks) | targeted checks passed | `f7d2f8e` | Startup Rank/Progress written before LoadGame never reach commander provenance, so resolved ranks were empty and the Commander page lost journal ranks (G2M-C browser gate). `MergeJournalRanks` adds the live reducer's journal ranks at the journal tier, keeps resolved levels and attaches progress only for the same level. `TestAuditMergeJournalRanks`. |
+| CI gate migration | targeted checks passed | `90a7d85` | CRLF-safe `TestAuditRPCClassificationComplete`; browser gates G2E/G2H/G2J/G2O open settings in the launcher, G2M-B checks `/missions/local-activity`, G2G/G2P expect the Advanced category, G2N waits for the adopted default before provider calls. All G2D–G3E browser gates except the CI-only baseline comparisons (G2K/G2L/G2M-A) pass locally. |
+
+### CI history for slice 2
+
+| Head | Legacy CI | Native Linux | Native Windows | Outcome |
+| --- | --- | --- | --- | --- |
+| `d3885e1` | [pass](https://github.com/Jakoczig/eridion/actions/runs/45080339797) | [fail](https://github.com/Jakoczig/eridion/actions/runs/45080339957): G2E browser gate clicked the removed terminal settings gear | fail: `TestAuditRPCClassificationComplete` could not parse the CRLF checkout of `socket.go` | Both caused by this slice; fixed in `f7d2f8e`/`90a7d85` after reproducing every runnable browser gate locally |
+| `90a7d85` | [pass](https://github.com/Jakoczig/eridion/actions/runs/45083157439) (5/5) | [pass](https://github.com/Jakoczig/eridion/actions/runs/45083157467) (all steps) | pass (all steps) | Green on first attempt; the final ledger-only head is verified in the PR description |
+
 ### Open items and limitations after slice 2
 
 - **Decision needed (Task 13 / contract 4):** paired-device trust is still bound to the commander it was paired under; a host-authorized commander switch disconnects devices paired under another commander instead of moving them to the new account. The plan asks displays to follow host switches, but that loosens the deliberately account-scoped pairing (`devices.go` `selectAccount`/`findLocked`). Kept unchanged pending owner confirmation.
