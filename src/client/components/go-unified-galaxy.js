@@ -1,15 +1,23 @@
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/router'
-import { Projection, zoomFrame, panFrame } from './go-galaxy-projection'
+import { Projection, zoomFrame, panFrame, panelLayout, fittedFrame, projectionUnits } from './go-galaxy-projection'
 import { atlasExtents } from './go-atlas'
 import { spatialSegments } from './go-spatial'
 import { distance } from '../lib/go-display-controller'
 import { coordinates, remainingRoute, automaticFrame, localScale, adjustAxis } from '../lib/go-galaxy-policy'
 
+export async function searchSystem (sendEvent, query, role) {
+  const name = query.trim()
+  if (!name) return null
+  const cached = await sendEvent('getGoSystem', { name })
+  if (cached.point?.name || (cached.availability && cached.availability !== 'unavailable') || role !== 'owner' || !cached.community?.enabled) return cached
+  return sendEvent('lookupGoSystem', { name })
+}
 export default function GoGalaxy ({ context, route, sendEvent, role, policy = {}, compact = false, inspection, onInspection }) {
   const router = useRouter()
   const [manualFrame, setManualFrame] = useState(inspection?.frame || null); const [forcedMode, setForcedMode] = useState(inspection?.mode || null)
   const [query, setQuery] = useState(inspection?.query || ''); const [searched, setSearched] = useState(inspection?.searched || null); const [notice, setNotice] = useState(''); const [busy, setBusy] = useState(false)
+  const searchPending = useRef(false)
   const [atlas, setAtlas] = useState(null); const [atlasNotice, setAtlasNotice] = useState(''); const [spatial, setSpatial] = useState(null); const [refresh, setRefresh] = useState(0)
   const area = useRef(null); const [size, setSize] = useState([320, 320]); const previousMode = useRef('galaxy')
   const galaxyEnabled = policy.galaxyMap !== false; const localEnabled = policy.localAtlas !== false
@@ -47,30 +55,33 @@ export default function GoGalaxy ({ context, route, sendEvent, role, policy = {}
     return () => { active = false; clearTimeout(timer) }
   }, [sendEvent, spatialKey, wantsLocal, refresh])
   const spans = 'xyz'.split('').map(a => frame[a][1] - frame[a][0])
-  const scale = Math.max(0.01, Math.min((size[0] - 6) / (spans[0] + spans[1]), (size[1] - 6) / (spans[2] + spans[1])))
-  const dimensions = { width: scale * (spans[0] + spans[1]) + 6, height: scale * (spans[2] + spans[1]) + 6, gridTemplateColumns: `${spans[0]}fr ${spans[1]}fr`, gridTemplateRows: `${spans[2]}fr ${spans[1]}fr` }
-  const pixelKey = JSON.stringify({ xz: [Math.ceil(scale * spans[0]), Math.ceil(scale * spans[2])], xy: [Math.ceil(scale * spans[0]), Math.ceil(scale * spans[1])], yz: [Math.ceil(scale * spans[1]), Math.ceil(scale * spans[2])] })
+  const dimensions = panelLayout(size[0], size[1])
+  const displayFrame = fittedFrame(frame)
+  const unit = (dimensions.width - 6) / (projectionUnits.x + projectionUnits.y)
+  const pixelKey = JSON.stringify(Object.fromEntries(['xz', 'xy', 'yz'].map(axes => [axes, [...axes].map(axis => Math.ceil(unit * projectionUnits[axis]))])))
+  const queryPixelsKey = JSON.stringify(Object.fromEntries(Object.entries(JSON.parse(pixelKey)).map(([axes, sizes]) => [axes, sizes.map((n, i) => Math.min(2048, Math.max(1, Math.ceil(n * (frame[axes[i]][1] - frame[axes[i]][0]) / (displayFrame[axes[i]][1] - displayFrame[axes[i]][0])))))])))
   useEffect(() => {
     if (!galaxyEnabled || local) return
     let active = true; let timer
-    const load = () => sendEvent('getGoAtlasView', { frame: JSON.parse(frameKey), projectionPixels: JSON.parse(pixelKey), pixels: 512, compact }).then(v => { if (!active) return; setAtlas(v); setAtlasNotice(v.installed ? '' : 'Galaxy atlas not installed'); if (v.pending) timer = setTimeout(load, 600) }).catch(() => { if (active) setAtlasNotice('Galaxy atlas unavailable') })
+    const load = () => sendEvent('getGoAtlasView', { frame: JSON.parse(frameKey), projectionPixels: JSON.parse(queryPixelsKey), pixels: 512, compact }).then(v => { if (!active) return; setAtlas(v); setAtlasNotice(v.installed ? '' : 'Galaxy atlas not installed'); if (v.pending) timer = setTimeout(load, 600) }).catch(() => { if (active) setAtlasNotice('Galaxy atlas unavailable') })
     timer = setTimeout(load, 180)
     return () => { active = false; clearTimeout(timer) }
-  }, [sendEvent, frameKey, pixelKey, galaxyEnabled, local, compact, refresh])
-  const search = async external => {
-    setBusy(true)
-    try { const result = await sendEvent(external ? 'lookupGoSystem' : 'getGoSystem', { name: query.trim() }); setSearched(result.point?.name ? result.point : null); setNotice(result.point?.coordinates ? '' : 'No coordinates reported') } catch { setNotice('Lookup unavailable; enabled EDSM lookup requires the local owner') } finally { setBusy(false) }
+  }, [sendEvent, frameKey, queryPixelsKey, galaxyEnabled, local, compact, refresh])
+  const search = async () => {
+    if (searchPending.current || !query.trim()) return
+    searchPending.current = true; setBusy(true)
+    try { const result = await searchSystem(sendEvent, query, role); setSearched(result?.point?.name ? result.point : null); setNotice(result?.point?.name ? (result.point.coordinates ? '' : 'No coordinates reported') : (result?.community?.notice || 'System unavailable; external lookup unavailable')) } catch { setNotice('System lookup unavailable') } finally { searchPending.current = false; setBusy(false) }
   }
   const switchMode = next => { setForcedMode(next); setManualFrame(next === 'local' && !localScale(automaticFrame(current, remaining, atlasExtents), 'local') && coordinates(current) ? automaticFrame(current, { points: [] }, atlasExtents) : null); previousMode.current = next }
   const path = [current, ...remaining.rawPoints].filter((p, i) => i !== 0 || coordinates(p))
-  const onPan = (axes, dx, dy) => { if (Math.abs(dx) + Math.abs(dy) > 0.01) setManualFrame(panFrame(frame, axes, dx, dy)) }
+  const onPan = (axes, dx, dy) => { if (Math.abs(dx) + Math.abs(dy) > 0.01) setManualFrame(panFrame(frame, axes, dx * (displayFrame[axes[0]][1] - displayFrame[axes[0]][0]) / (frame[axes[0]][1] - frame[axes[0]][0]), dy * (displayFrame[axes[1]][1] - displayFrame[axes[1]][0]) / (frame[axes[1]][1] - frame[axes[1]][0]))) }
   const zoom = factor => { setManualFrame(zoomFrame(frame, factor)); setForcedMode(null) }
-  const projectionProps = { current, destination, searched, route: path.filter(coordinates), onSelect: setSearched, frame, onPan, localGeometry: true, routeSegments: spatialSegments(path, frame), atlas: galaxyEnabled && !local ? atlas : null, spatial: local ? spatial.points || [] : null }
+  const projectionProps = { current, destination, searched, route: path.filter(coordinates), onSelect: setSearched, frame: displayFrame, onPan, localGeometry: true, selectionFrame: frame, routeSegments: spatialSegments(path, frame), atlas: galaxyEnabled && !local ? atlas : null, spatial: local ? spatial.points || [] : null }
   const selectedDistance = distance(current?.coordinates, searched?.coordinates)
   return (
     <section className={`go-page go-galaxy go-g3d ${compact ? 'is-compact' : ''}`} aria-label='Galaxy map' data-mode={mode}>
       <div className='go-galaxy-sidebar'><h2>Galaxy Map</h2>
-        <form onSubmit={e => { e.preventDefault(); search(false) }}><label>System<input aria-label='Galaxy system search' maxLength={128} value={query} onChange={e => setQuery(e.target.value)} /></label><button disabled={busy || !query.trim()}>Search local / cached</button>{role === 'owner' && <button type='button' disabled={busy || !query.trim()} onClick={() => search(true)}>Lookup with enabled EDSM</button>}</form>
+        <form onSubmit={e => { e.preventDefault(); search() }}><label>System<input aria-label='Galaxy system search' maxLength={128} value={query} onChange={e => setQuery(e.target.value)} /></label><button disabled={busy || !query.trim()}>Search</button></form>
         <div className='go-galaxy-mode'><button aria-pressed={mode === 'galaxy'} disabled={!galaxyEnabled} onClick={() => switchMode('galaxy')}>Galaxy</button><button aria-pressed={mode === 'local'} disabled={!localEnabled || !knownCenter} onClick={() => switchMode('local')}>Local</button></div>
         <button onClick={() => { setManualFrame(null); setForcedMode(null) }}>Fit Route</button>
         <div className='go-galaxy-mode'><button aria-label='Galaxy zoom out' onClick={() => zoom(2)}>Zoom −</button><button aria-label='Galaxy zoom in' onClick={() => zoom(0.5)}>Zoom +</button></div>

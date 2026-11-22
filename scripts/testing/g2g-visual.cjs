@@ -79,7 +79,8 @@ async function main () {
     report.fsd.manualOverride = true; host.child.stdin.write('arrival\n'); await delay(1200)
     await navigate('/nav/galaxy', 'GALAXY MAP'); host.child.stdin.write('jump\n'); await waitFor(() => evaluate('!!document.querySelector(\'[aria-label="Automatic FSD display"]\')')); host.child.stdin.write('arrival\n'); await waitFor(() => evaluate('!!document.querySelector(\'[aria-label="Galaxy map"]\')&&!document.querySelector(\'[aria-label="Automatic FSD display"]\')')); report.fsd.restoredPriorScreen = true
     await evaluate('(()=>{const i=document.querySelector(\'[aria-label="Galaxy system search"]\');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,\'value\').set.call(i,\'Fixture Beta\');i.dispatchEvent(new Event(\'input\',{bubbles:true}))})()')
-    await evaluate('Array.from(document.querySelectorAll(\'button\')).find(b=>b.textContent===\'Lookup with enabled EDSM\').click()')
+    await waitFor(() => evaluate('!document.querySelector(".go-galaxy-sidebar form button").disabled'))
+    await evaluate('Array.from(document.querySelectorAll(\'button\')).find(b=>b.textContent===\'Search\').click()')
     await waitFor(() => evaluate('document.querySelector(\'.go-galaxy-sidebar\')?.textContent.includes(\'Fixture Beta\')'))
     await evaluate('Array.from(document.querySelectorAll(\'button\')).find(b=>b.textContent===\'View System\').click()')
     await waitFor(() => evaluate('document.querySelector(\'.go-cartography\')?.textContent.includes(\'Fixture Beta\')')); report.viewSystem = true

@@ -24,6 +24,9 @@ import (
 
 type nativeHost struct {
 	windowMu      sync.Mutex
+	profile       string
+	saveMu        sync.Mutex
+	saveDashboard func()
 	trayAvailable bool
 	app           *application.App
 	launcher      *application.WebviewWindow
@@ -52,12 +55,23 @@ func newNativeHost(stop func()) (windowHost, error) {
 		Assets:     application.AssetOptions{Handler: http.NotFoundHandler(), DisableLogging: true},
 		OnShutdown: func() { host.stopped.Store(true); stop() },
 	})
-	host.app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) { host.started.Store(true); host.maybeQuit() })
+	host.app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		host.started.Store(true)
+		// Screen enumeration is ready here. Apply startup sizing once, never on map changes.
+		if host.launcher != nil && !host.launcher.IsMaximised() {
+			options := host.dashboardOptions()
+			host.launcher.SetSize(options.Width, options.Height)
+		}
+		host.maybeQuit()
+	})
 	return host, nil
 }
 
 func (h *nativeHost) Bind(c *Controller) {
 	h.controller = c
+	c.mu.Lock()
+	h.profile = c.windowProfile
+	c.mu.Unlock()
 	c.Bind(h.Action)
 	c.BindAvatar(func() ([]byte, error) {
 		if !h.started.Load() || h.stopped.Load() || !h.launcher.IsFocused() {
@@ -120,11 +134,15 @@ func (h *nativeHost) Open(localURL string) error {
 	}
 	h.companion = strings.HasSuffix(localURL, "/launcher")
 	h.base = strings.TrimSuffix(localURL, "/launcher")
-	width, height := 1280, 850
+	initial := h.dashboardOptions()
+	width, height := initial.Width, initial.Height
 	if h.companion {
-		width, height = 680, 580
+		initial.StartState = application.WindowStateNormal
 	}
-	h.launcher = h.app.Window.NewWithOptions(application.WebviewWindowOptions{Title: "ERIDION — Experimental Go Preview", Width: width, Height: height, URL: localURL})
+	h.launcher = h.app.Window.NewWithOptions(application.WebviewWindowOptions{Title: "ERIDION — Experimental Go Preview", Width: width, Height: height, StartState: initial.StartState, URL: localURL})
+	if !h.companion {
+		h.rememberDashboard(h.launcher)
+	}
 	h.launcher.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		if h.companion && h.controller != nil && !h.controller.quitOnClose.Load() && !h.requested.Load() {
 			e.Cancel()
@@ -180,8 +198,12 @@ func (h *nativeHost) Action(action string) error {
 		h.windowMu.Lock()
 		d := h.dashboard.Load()
 		if d == nil {
-			d = h.app.Window.NewWithOptions(application.WebviewWindowOptions{Title: "ERIDION Dashboard — Experimental", Width: 1366, Height: 900, URL: h.base + "/nav/route"})
+			options := h.dashboardOptions()
+			options.Title = "ERIDION Dashboard — Experimental"
+			options.URL = h.base + "/nav/route"
+			d = h.app.Window.NewWithOptions(options)
 			h.dashboard.Store(d)
+			h.rememberDashboard(d)
 			d.OnWindowEvent(events.Common.WindowClosing, func(*application.WindowEvent) {
 				h.dashboard.CompareAndSwap(d, nil)
 			})
@@ -204,9 +226,75 @@ func (h *nativeHost) Action(action string) error {
 	return nil
 }
 func (h *nativeHost) Run() error { defer h.stopped.Store(true); return h.app.Run() }
-func (h *nativeHost) Quit()      { h.requested.Store(true); h.maybeQuit() }
+func (h *nativeHost) Quit() {
+	h.saveMu.Lock()
+	save := h.saveDashboard
+	h.saveMu.Unlock()
+	if save != nil {
+		save()
+	}
+	h.requested.Store(true)
+	h.maybeQuit()
+}
 func (h *nativeHost) maybeQuit() {
 	if h.started.Load() && h.requested.Load() && !h.stopped.Load() {
 		h.quitOnce.Do(func() { h.app.Quit() })
 	}
+}
+
+func (h *nativeHost) dashboardOptions() application.WebviewWindowOptions {
+	workWidth, workHeight := 1600, 1000
+	if screen := h.app.Screen.GetPrimary(); screen != nil {
+		workWidth, workHeight = screen.WorkArea.Width, screen.WorkArea.Height
+	}
+	if h.launcher != nil {
+		if screen, err := h.launcher.GetScreen(); err == nil && screen != nil {
+			workWidth, workHeight = screen.WorkArea.Width, screen.WorkArea.Height
+		}
+	}
+	size := dashboardSize(workWidth, workHeight, loadWindowSize(h.profile))
+	state := application.WindowStateNormal
+	if size.Maximized {
+		state = application.WindowStateMaximised
+	}
+	return application.WebviewWindowOptions{Width: size.Width, Height: size.Height, StartState: state}
+}
+func (h *nativeHost) rememberDashboard(w *application.WebviewWindow) {
+	var mu sync.Mutex
+	options := h.dashboardOptions()
+	last := windowSize{Width: options.Width, Height: options.Height, Maximized: options.StartState == application.WindowStateMaximised}
+	width, height := w.Size()
+	if width > 0 && height > 0 && !w.IsMaximised() && !last.Maximized {
+		last.Width, last.Height = width, height
+	}
+	// Keep normal dimensions in memory; write once on close, never per resize.
+	w.OnWindowEvent(events.Common.WindowDidResize, func(*application.WindowEvent) {
+		if w.IsMaximised() || w.IsMinimised() {
+			return
+		}
+		width, height := w.Size()
+		mu.Lock()
+		last.Width, last.Height = width, height
+		mu.Unlock()
+	})
+	store := func() {
+		mu.Lock()
+		v := last
+		mu.Unlock()
+		if err := saveWindowSize(h.profile, v); err != nil {
+			h.app.Logger.Error("Unable to save dashboard window size", "error", err)
+		}
+	}
+	h.saveMu.Lock()
+	h.saveDashboard = store
+	h.saveMu.Unlock()
+	w.OnWindowEvent(events.Common.WindowMaximise, func(*application.WindowEvent) { mu.Lock(); last.Maximized = true; mu.Unlock() })
+	w.OnWindowEvent(events.Common.WindowUnMaximise, func(*application.WindowEvent) { mu.Lock(); last.Maximized = false; mu.Unlock() })
+	w.RegisterHook(events.Common.WindowClosing, func(*application.WindowEvent) {
+		maximized := w.IsMaximised()
+		mu.Lock()
+		last.Maximized = maximized
+		mu.Unlock()
+		store()
+	})
 }

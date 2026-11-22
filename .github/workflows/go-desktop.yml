@@ -2,7 +2,7 @@ name: ERIDION Go desktop
 
 on:
   pull_request:
-    branches: [main, security/phase-1a-foundations, go/g1a-desktop-foundation, go/g1b-secure-remote-displays, go/g2a-journal-ingestion, go/g2b-local-nav-exploration, go/g2c-exploration-parity, go/g2d-original-ui-parity, go/g2e-feature-parity, go/g2f-usability-edsm, go/g2g-navigation-launcher, go/g2h-unified-navigation-integrations, go/g2j-persistent-history-integrations, go/g2k-native-field-operations, go/g2l-fleet-economy-commander-operations, go/g2m-a-eridion-identity-frontier, go/g2m-b-navigation-field-context, go/g2m-c-live-audit-functional-corrections, go/g2n-commander-fleet-completion, go/g2o-signed-galaxy-atlas-client, go/g2p-launcher-settings-frontier, go/g2q-galaxy-map-fidelity, go/g3c-hybrid-spatial-galaxy]
+    branches: [main, security/phase-1a-foundations, go/g1a-desktop-foundation, go/g1b-secure-remote-displays, go/g2a-journal-ingestion, go/g2b-local-nav-exploration, go/g2c-exploration-parity, go/g2d-original-ui-parity, go/g2e-feature-parity, go/g2f-usability-edsm, go/g2g-navigation-launcher, go/g2h-unified-navigation-integrations, go/g2j-persistent-history-integrations, go/g2k-native-field-operations, go/g2l-fleet-economy-commander-operations, go/g2m-a-eridion-identity-frontier, go/g2m-b-navigation-field-context, go/g2m-c-live-audit-functional-corrections, go/g2n-commander-fleet-completion, go/g2o-signed-galaxy-atlas-client, go/g2p-launcher-settings-frontier, go/g2q-galaxy-map-fidelity, go/g3c-hybrid-spatial-galaxy, go/g3d-unified-galaxy-map]
   push:
     branches: [go/g1a-desktop-foundation, go/g1b-secure-remote-displays, go/g2a-journal-ingestion, go/g2b-local-nav-exploration, go/g2c-exploration-parity, go/g2d-original-ui-parity]
 
@@ -428,13 +428,23 @@ jobs:
           path: temp/g3d-visual/
           if-no-files-found: warn
 
+      - name: G3E fixed map geometry search and viewport verification
+        run: node scripts/testing/g3e-visual.cjs
+      - name: Upload G3E synthetic visual evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: eridion-g3e-synthetic-evidence-${{ runner.os }}
+          path: temp/g3e-visual/
+          if-no-files-found: warn
+
       - name: Package experimental preview
         id: preview
         run: node scripts/build/package-go-preview.cjs
       - name: Upload experimental unsigned local route and survey preview
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: eridion-g3d-${{ runner.os }}-x64-experimental-unsigned-preview
+          name: eridion-g3e-${{ runner.os }}-x64-experimental-unsigned-preview
           path: ${{ steps.preview.outputs.directory }}
           if-no-files-found: error
           retention-days: 14
