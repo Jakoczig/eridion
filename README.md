@@ -16,7 +16,7 @@ ERIDION continues the work of [DAEDALUS Terminal](https://github.com/Varzeki/dae
 | --- | --- | --- |
 | Native ERIDION | [go/g3f-galaxy-viewport-slices][native-branch] and [PR #28][preview-pr] | Current preview described by this README, as of 22 November 2026. |
 | Legacy application | [main](https://github.com/Jakoczig/eridion/tree/main) | Contains the inherited application; the native development stack has not been merged here. |
-| Planned corrections | [Development priorities below](#development-priorities) | Agreed direction for subsequent work; these are not claims of completed functionality. |
+| Planned corrections | [Development plans and Claude handoff](docs/plans/README.md) | Recorded audit, prioritized implementation tasks and performance acceptance; application changes remain pending. |
 
 The native preview has Windows and Linux build and automated verification workflows. Real-game behavior, physical paired devices, and live provider coverage still need acceptance for each relevant change. Preview artifacts are unsigned experimental executables, not a stable ERIDION installer.
 
@@ -89,7 +89,9 @@ These requirements guide the next corrections and feature work. They are deliber
 
 ## Development and documentation
 
-Start with [BUILD.md](BUILD.md) and [CONTRIBUTING.md](CONTRIBUTING.md). The [native mining roadmap](docs/roadmap/mining.md) consolidates useful inherited mining and layout requirements. The [inherited-file audit](docs/maintenance/inherited-files-audit.md) records the cleanup decisions and retained provenance.
+For the next native coding batch, start with the [Claude coding handoff](docs/handoffs/2026-11-22-claude-coding-handoff.md) and [development planning index](docs/plans/README.md), including the [detailed performance plan](docs/superpowers/plans/2026-11-22-native-performance.md). The handoff pins the native source separately from main and preserves the existing draft PR stack.
+
+Build and contribution guidance is in [BUILD.md](BUILD.md) and [CONTRIBUTING.md](CONTRIBUTING.md). The [native mining roadmap](docs/roadmap/mining.md) consolidates useful inherited mining and layout requirements. The [inherited-file audit](docs/maintenance/inherited-files-audit.md) records the cleanup decisions and retained provenance.
 
 | Location on the native branch | Purpose |
 | --- | --- |
