@@ -34,7 +34,7 @@ func TestG2EWorkspaceOptInAndViewerAllowlist(t *testing.T) {
 	defer cancel()
 	reply := callRPC(t, ctx, c, "getGoWorkspace")
 	body := reply["message"]
-	onlyKeys(t, body, "parity activity")
+	onlyKeys(t, body, "parity activity exosuit") // D1: paired displays receive the same Exosuit data
 	if !strings.Contains(string(body), "FrameShiftDrive") || strings.Contains(string(body), "PRIVATE_") || strings.Contains(string(body), "9007199254740993") {
 		t.Fatal("invalid public workspace", string(body))
 	}

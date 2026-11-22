@@ -60,6 +60,7 @@ func Clone(v View) View {
 	v.Inventory.Items = copySlice(v.Inventory.Items)
 	v.Materials.Items = copySlice(v.Materials.Items)
 	v.Status = cloneStatus(v.Status)
+	v.Exosuit = cloneExosuit(v.Exosuit)
 	return v
 }
 
@@ -73,5 +74,6 @@ func cloneStatus(v StatusView) StatusView {
 	v.CargoT = copyPtr(v.CargoT)
 	v.Temperature = copyPtr(v.Temperature)
 	v.GuiFocus = copyPtr(v.GuiFocus)
+	v.OnFoot = cloneOnFoot(v.OnFoot)
 	return v
 }

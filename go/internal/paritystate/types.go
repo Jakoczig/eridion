@@ -12,6 +12,8 @@ type View struct {
 	Inventory    InventoryView  `json:"inventory"`
 	Materials    MaterialView   `json:"materials"`
 	Status       StatusView     `json:"status"`
+	// Exosuit is delivered separately as WorkspaceView.Exosuit.
+	Exosuit ExosuitView `json:"-"`
 }
 type Module struct {
 	Slot         string           `json:"slot"`
@@ -101,6 +103,9 @@ type StatusView struct {
 	CargoT         *float64      `json:"cargoT"`
 	Temperature    *float64      `json:"temperature"`
 	GuiFocus       *int          `json:"guiFocus"`
+	// OnFoot carries suit telemetry. It is parsed before the main-ship guard
+	// and never mixed with ship fuel, cargo or pips.
+	OnFoot *OnFootStatus `json:"onFoot"`
 }
 type StatusFlags2 struct {
 	OnFoot                bool `json:"onFoot"`

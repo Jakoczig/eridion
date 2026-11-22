@@ -155,29 +155,66 @@ func (s *Service) selectedSummaryLocked() Summary {
 }
 func (s *Service) Accounts() AccountSettings { s.mu.Lock(); defer s.mu.Unlock(); return s.accounts }
 
-// OwnerShipIdentity recovers witnessed renames from durable history even when an
-// older reducer cache predates rename support. Exact commander/ship ID binding
-// is mandatory; provider current-ship guesses are not used.
-func (s *Service) OwnerShipIdentity() map[string]string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	fid := s.displayFIDLocked()
+// ShipIdentity is the single resolved main-ship identity shown by every
+// screen (Commander, header/statistics, account cards, paired displays).
+type ShipIdentity struct {
+	Name       string `json:"shipName"`
+	Model      string `json:"model"`
+	ModelLabel string `json:"shipType"`
+	Source     string `json:"source"`
+}
+
+// shipIdentityLocked applies D0 to the main ship: a fresh validated Frontier
+// current ship first, then the journal ship view, then the durable witnessed
+// rename for that exact commander/ship ID when it is not older than the
+// view's Loadout (covering reducer caches that predate rename support). Suits and vehicles never appear here because the
+// ship reducer keeps the real main ship.
+func (s *Service) shipIdentityLocked(ctx context.Context, fid string, facts []history.EffectiveFact) ShipIdentity {
 	v := s.views.ship.View(fid)
-	out := map[string]string{"shipName": v.ShipName, "shipType": catalog.ShipDisplayName(v.ShipType)}
-	if s.summary.ImportInProgress {
-		return map[string]string{"shipName": "", "shipType": ""}
-	}
+	out := ShipIdentity{Name: v.ShipName, Model: v.ShipType, Source: "journal"}
 	if s.store != nil && fid != "" {
 		var name, at string
-		if e := s.store.WitnessedShipName(context.Background(), fid, s.views.ship.LastKnownIdentity(fid), &name, &at); e == nil && name != "" {
+		if e := s.store.WitnessedShipName(ctx, fid, s.views.ship.LastKnownIdentity(fid), &name, &at); e == nil && name != "" {
 			observed, e := time.Parse(time.RFC3339Nano, at)
 			loaded, _ := time.Parse(time.RFC3339Nano, v.LoadoutAt)
 			if e == nil && !observed.Before(loaded) {
-				out["shipName"] = name
+				out.Name = name
 			}
 		}
 	}
+	if ship, ok := history.ResolveCurrentShip(facts); ok {
+		out.Source = ship.Source
+		if ship.Name != "" {
+			out.Name = ship.Name
+		}
+		if ship.Model != "" {
+			out.Model = ship.Model
+		}
+	}
+	out.ModelLabel = catalog.ShipDisplayName(out.Model)
 	return out
+}
+
+func (s *Service) factsLocked(ctx context.Context, fid string) []history.EffectiveFact {
+	if s.store == nil || fid == "" {
+		return nil
+	}
+	facts, _ := s.store.EffectiveFacts(ctx, fid, "commander", time.Now())
+	return facts
+}
+
+// OwnerShipIdentity returns the resolved ship identity of the displayed
+// commander. Exact commander/ship ID binding is mandatory.
+func (s *Service) OwnerShipIdentity() map[string]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.summary.ImportInProgress {
+		return map[string]string{"shipName": "", "shipType": ""}
+	}
+	fid := s.displayFIDLocked()
+	ctx := context.Background()
+	id := s.shipIdentityLocked(ctx, fid, s.factsLocked(ctx, fid))
+	return map[string]string{"shipName": id.Name, "shipType": id.ModelLabel, "source": id.Source}
 }
 
 // SetAccounts changes multi-mode and its temporary selection. The persisted
@@ -259,9 +296,10 @@ func (s *Service) AccountCards() []AccountCard {
 			}
 		}
 	}
+	ctx := context.Background()
 	for _, fid := range s.order {
-		ship := s.views.ship.View(fid)
-		out = append(out, AccountCard{fid, names[fid], ship.ShipName, catalog.ShipDisplayName(ship.ShipType), s.commanders[fid].system, fid == s.displayFIDLocked(), fid == s.accounts.Default})
+		ship := s.shipIdentityLocked(ctx, fid, s.factsLocked(ctx, fid))
+		out = append(out, AccountCard{fid, names[fid], ship.Name, ship.ModelLabel, s.commanders[fid].system, fid == s.displayFIDLocked(), fid == s.accounts.Default})
 	}
 	return out
 }
@@ -269,8 +307,10 @@ func (s *Service) CommanderOverview(ctx context.Context) (map[string]any, error)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	fid := s.displayFIDLocked()
-	out := map[string]any{"fid": fid, "system": s.commanders[fid].system, "shipName": s.views.ship.View(fid).ShipName, "shipType": catalog.ShipDisplayName(s.views.ship.View(fid).ShipType), "journalMismatch": fid != s.active}
+	out := map[string]any{"fid": fid, "system": s.commanders[fid].system, "journalMismatch": fid != s.active}
 	if s.store == nil {
+		ship := s.shipIdentityLocked(ctx, fid, nil)
+		out["shipName"], out["shipType"], out["identitySource"] = ship.Name, ship.ModelLabel, ship.Source
 		return out, nil
 	}
 	people, e := s.store.Commanders()
@@ -290,18 +330,12 @@ func (s *Service) CommanderOverview(ctx context.Context) (map[string]any, error)
 	// D0: ranks and current ship identity come from the same resolver as every
 	// other commander fact; the journal view is only the fallback.
 	out["ranks"] = history.ResolveRanks(facts)
-	out["identitySource"] = "journal"
-	if ship, ok := history.ResolveCurrentShip(facts); ok {
-		out["identitySource"] = ship.Source
-		out["identityFetchedAt"] = ship.FetchedAt
-		if ship.Name != "" {
-			out["shipName"] = ship.Name
-		}
-		if ship.Model != "" {
-			out["shipType"] = catalog.ShipDisplayName(ship.Model)
-		}
-		if ship.SystemName != "" {
-			out["system"] = ship.SystemName
+	ship := s.shipIdentityLocked(ctx, fid, facts)
+	out["shipName"], out["shipType"], out["identitySource"] = ship.Name, ship.ModelLabel, ship.Source
+	if current, ok := history.ResolveCurrentShip(facts); ok {
+		out["identityFetchedAt"] = current.FetchedAt
+		if current.SystemName != "" {
+			out["system"] = current.SystemName
 		}
 	}
 	fleet, e := s.store.ReconciledFleetCount(ctx, fid, facts)
