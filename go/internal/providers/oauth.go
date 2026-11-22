@@ -53,6 +53,9 @@ func (m *Manager) BeginAuthorization(base string) (string, error) {
 	if m.closed || (m.opts.RequireHistory && m.history == nil) {
 		return "", errors.New("Provider service closed")
 	}
+	if m.blocked {
+		return "", errors.New("Choose a commander in the launcher before connecting Frontier")
+	}
 	if m.clientID() == "" {
 		return "", errors.New("Frontier developer application approval required")
 	}

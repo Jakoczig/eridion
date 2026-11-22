@@ -31,7 +31,11 @@ type Summary struct {
 	EventsRead       uint64 `json:"eventsRead"`
 }
 type Options struct {
-	DisplayAccount  func(string, bool)
+	DisplayAccount func(string, bool)
+	// ProviderAccount is told the commander whose provider namespace may now
+	// run when single-commander adoption resolves the default; until then
+	// the provider manager stays blocked. Called with the service lock held.
+	ProviderAccount func(string)
 	ProviderSidecar func(sidecar.Change)
 	OnHistoryReady  func(*history.Store, history.ProviderSeed)
 	StorageDir      string

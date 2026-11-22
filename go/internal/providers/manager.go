@@ -24,7 +24,11 @@ import (
 )
 
 type Manager struct {
-	accountFID, pinnedAccount                      string
+	accountFID, pinnedAccount string
+	// blocked is the explicit "no commander chosen yet" state: no account
+	// namespace, observation, upload, read or authorization runs until the
+	// launcher (or single-commander adoption) pins a real commander.
+	blocked                                        bool
 	accountConfigs                                 map[string]map[string]storedConfig
 	hostCooldown                                   map[string]time.Time
 	station                                        stationSession
@@ -320,6 +324,9 @@ func (m *Manager) Status() []Status {
 		if m.notice != "" {
 			state = "storage_warning"
 		}
+		if m.blocked {
+			state = "awaiting_commander"
+		}
 		counts := map[string]uint64{}
 		for k, v := range s.counts {
 			counts[k] = v
@@ -389,9 +396,9 @@ func (m *Manager) Observe(e journal.Event, phase journal.Phase) {
 	}
 	if e.Type == "LoadGame" && e.FID != "" && phase == journal.Live {
 		m.mu.Lock()
-		pin := m.pinnedAccount
+		pin, blocked := m.pinnedAccount, m.blocked
 		m.mu.Unlock()
-		if pin == "" || pin == e.FID {
+		if !blocked && (pin == "" || pin == e.FID) {
 			m.activateObservedAccount(e.FID)
 		}
 	}
@@ -451,7 +458,7 @@ func (m *Manager) Observe(e journal.Event, phase journal.Phase) {
 			m.address = v["SystemAddress"]
 		}
 	}
-	if (m.opts.RequireHistory && m.history == nil) || phase != journal.Live || (m.pinnedAccount != "" && m.pinnedAccount != m.fid) || (m.accountFID != "" && m.accountFID != m.fid) || m.identity == "" || !strings.HasPrefix(m.gameVersion, "4.") || strings.ContainsAny(strings.ToLower(m.gameVersion), "abcdefghijklmnopqrstuvwxyz") {
+	if m.blocked || (m.opts.RequireHistory && m.history == nil) || phase != journal.Live || (m.pinnedAccount != "" && m.pinnedAccount != m.fid) || (m.accountFID != "" && m.accountFID != m.fid) || m.identity == "" || !strings.HasPrefix(m.gameVersion, "4.") || strings.ContainsAny(strings.ToLower(m.gameVersion), "abcdefghijklmnopqrstuvwxyz") {
 		return
 	}
 	age := m.opts.Now().Sub(e.Timestamp)

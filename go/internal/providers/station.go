@@ -43,7 +43,7 @@ func (m *Manager) ObserveSidecar(c sidecar.Change) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.closed || m.history == nil || m.station.Files == nil {
+	if m.closed || m.blocked || m.history == nil || m.station.Files == nil {
 		return
 	}
 	if !c.Valid {

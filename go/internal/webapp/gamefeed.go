@@ -59,8 +59,10 @@ func (s *Server) startGame(ctx context.Context, opts Options) {
 		persistentDir = opts.StorageDir
 	}
 	// Pin the provider namespace to the configured commander before any
-	// journal event can activate another account. A damaged preference pins
-	// nothing; the launcher asks for the default once.
+	// journal event can activate another account. Without a resolved
+	// commander (first run with several identities, or a damaged preference)
+	// PinAccount("") leaves the provider manager explicitly blocked until the
+	// launcher choice or single-commander adoption pins one.
 	accounts, _ := gamestate.LoadAccountSettings(opts.StorageDir)
 	if s.providers != nil {
 		if accounts.Multiple {
@@ -69,7 +71,11 @@ func (s *Server) startGame(ctx context.Context, opts Options) {
 			s.providers.PinAccount(accounts.Default)
 		}
 	}
-	s.game, _ = gamestate.NewService(gamestate.Options{DisplayAccount: func(fid string, verifiedSingle bool) {
+	s.game, _ = gamestate.NewService(gamestate.Options{ProviderAccount: func(fid string) {
+		if s.providers != nil {
+			s.providers.PinAccount(fid)
+		}
+	}, DisplayAccount: func(fid string, verifiedSingle bool) {
 		if s.remote != nil {
 			s.remote.selectAccount(fid, verifiedSingle)
 		}

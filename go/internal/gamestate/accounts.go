@@ -132,6 +132,9 @@ func (s *Service) adoptDefaultLocked() {
 	next.Default = s.order[0]
 	if s.persistAccountsLocked(next) == nil {
 		s.accounts = next
+		if !next.Multiple && s.opts.ProviderAccount != nil {
+			s.opts.ProviderAccount(next.Default)
+		}
 	}
 }
 

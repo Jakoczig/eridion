@@ -93,6 +93,9 @@ func (m *Manager) ActivateAccount(fid string, adoptLegacy bool) error {
 	defer m.vaultMu.Unlock()
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.blocked {
+		return errors.New("Choose a commander in the launcher before provider access")
+	}
 	if m.pinnedAccount != "" && m.pinnedAccount != fid {
 		return errors.New("Commander selection changed; retry in the selected profile")
 	}
@@ -199,14 +202,29 @@ func (m *Manager) activateAccountLocked(fid string, adoptLegacy bool) error {
 
 // PinAccount prevents a different live journal account from changing provider
 // context after the owner chose a profile. Its events cannot enter this queue.
+// An empty fid means no commander has been chosen: the manager becomes
+// explicitly blocked (see Manager.blocked) instead of following the journal.
 func (m *Manager) PinAccount(fid string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.pinnedAccount != fid {
+	if m.pinnedAccount != fid || (fid == "") != m.blocked {
 		m.oauth = nil
 		m.cancelPublicationLocked()
 	}
+	if fid == "" && !m.blocked {
+		for _, s := range m.states {
+			s.queue = nil
+		}
+	}
 	m.pinnedAccount = fid
+	m.blocked = fid == ""
+}
+
+// Blocked reports the explicit awaiting-commander state.
+func (m *Manager) Blocked() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.blocked
 }
 func (m *Manager) AccountMatches() bool {
 	m.mu.Lock()
@@ -236,7 +254,7 @@ func (m *Manager) activateObservedAccount(fid string) {
 	defer m.vaultMu.Unlock()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if (m.pinnedAccount != "" && m.pinnedAccount != fid) || m.accountFID == fid {
+	if m.blocked || (m.pinnedAccount != "" && m.pinnedAccount != fid) || m.accountFID == fid {
 		return
 	}
 	if e := m.activateAccountLocked(fid, false); e != nil {
