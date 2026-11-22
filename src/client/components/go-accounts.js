@@ -11,6 +11,12 @@ export default function GoAccounts ({ sendEvent, cardsOnly = false, launcher = f
   // once only when several verified commanders exist without a default.
   const cards = (value?.cards || []).filter(c => multiple || needsDefault || !cardsOnly || c.default || (!value?.settings?.defaultFID && c.active))
   if (cardsOnly && !cards.length) return null
+  // On the launcher home a resolved single-mode default is a compact identity
+  // line: no select step, and no extra card height in small windows.
+  if (cardsOnly && !multiple && !needsDefault) {
+    const d = cards[0]
+    return <p className='go-launcher-commander' aria-label='Default commander'>{d.avatar ? <img src={d.avatar} alt='' width='24' height='24' /> : <Icon name='shield' />}<strong>{d.name || 'Verified commander'}</strong>{d.shipName || d.shipType ? <span>{d.shipName || d.shipType}</span> : null}{value?.recovery && <small role='status'>Preference recovered</small>}</p>
+  }
   const heading = multiple ? (value.choiceRequired ? 'Choose commander for this launch' : 'Selected commander') : needsDefault ? 'Choose default commander' : 'Default commander'
   return <section className='go-account-settings' aria-label='Commander profiles'>{!cardsOnly && <><h3>Commander profiles</h3><label><input type='checkbox' checked={multiple} onChange={e => save(e.target.checked, value?.cards?.find(c => c.active)?.fid || '')} /> Enable multiple accounts</label></>}{cardsOnly && <h3>{heading}</h3>}{value?.recovery && <p role='status'>Saved commander preference could not be read and was kept for recovery. Choose the default commander again.</p>}<div className='go-account-cards'>{cards.map(c => <article key={c.fid}>{c.avatar ? <img src={c.avatar} alt='Commander portrait' width='48' height='48' /> : <Icon name='shield' />}<strong>{c.name || 'Verified commander'}</strong>{c.shipName || c.shipType ? <span>{c.shipName || c.shipType}</span> : null}{c.system && <small>{c.system}</small>}{multiple && <button aria-pressed={c.active && !value.choiceRequired} onClick={() => save(true, c.fid)}>Select commander</button>}{!multiple && (needsDefault || (!cardsOnly && !c.default)) && <button aria-pressed={!!c.default} onClick={() => save(false, '', c.fid)}>{needsDefault ? 'Use as default' : 'Make default'}</button>}{!multiple && !needsDefault && c.default && !cardsOnly && <small>Default commander</small>}{launcher && <button onClick={() => portrait(c.fid)}>Change portrait</button>}</article>)}</div>{error && <p role='status'>{error}</p>}</section>
 }

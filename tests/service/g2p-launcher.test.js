@@ -33,7 +33,7 @@ test('launcher shows the default commander without a select step and asks once w
   const cards = [{ fid: 'FIXTURE-A', name: 'Fixture A', active: false, default: false }, { fid: 'FIXTURE-B', name: 'Fixture B', active: true, default: true }]
   let h = harness('go-accounts', () => ({ settings: { multiple: false, defaultFID: 'FIXTURE-B' }, cards, choiceRequired: false, defaultRequired: false }))
   h.props.cardsOnly = true
-  try { h.html(); await h.flush(); const html = h.html(); assert.match(html, /Default commander/); assert.match(html, /Fixture B/); assert.doesNotMatch(html, /Fixture A/); assert.doesNotMatch(html, /Select commander|Use as default/) } finally { h.unmount() }
+  try { h.html(); await h.flush(); const html = h.html(); assert.match(html, /aria-label="Default commander"/); assert.match(html, /Fixture B/); assert.doesNotMatch(html, /Fixture A/); assert.doesNotMatch(html, /<button|<article/) } finally { h.unmount() }
   const requests = []
   const ambiguous = { settings: { multiple: false }, cards: cards.map(c => ({ ...c, default: false })), choiceRequired: true, defaultRequired: true }
   h = harness('go-accounts', () => ambiguous)

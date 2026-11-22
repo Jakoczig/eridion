@@ -57,3 +57,4 @@ html:has(.go-launcher){zoom:1}
 .go-terminal .go-route>.go-field-ops{font-size:.9rem;flex:none;margin-top:.5rem}
 .go-terminal .go-route>.go-field-ops h3{font-size:1.1rem}
 .go-terminal .go-route>.go-field-ops details>summary{cursor:pointer}
+.go-launcher .go-launcher-commander{display:flex;align-items:center;gap:.5rem;margin:-.4rem 0 .2rem;font-size:1rem;line-height:1.4;min-width:0;overflow-wrap:anywhere}.go-launcher .go-launcher-commander img{border-radius:50%;flex:none}.go-launcher .go-launcher-commander span::before{content:"· "}

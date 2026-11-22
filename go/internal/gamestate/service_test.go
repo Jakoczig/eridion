@@ -59,9 +59,14 @@ func TestGameStateTwoFIDSessionsDoNotMix(t *testing.T) {
 	appendEvent(t, dir, `{"event":"LoadGame","FID":"SYNTHETIC-A"}`)
 	appendEvent(t, dir, `{"event":"Location","StarSystem":"Fixture A","SystemAddress":9223372036854775807}`)
 	s := startService(t, dir)
-	waitState(t, s, func(v Summary) bool { return v.CurrentSystem == "Fixture A" })
-	// A is the sole first commander and becomes the persisted default; the
-	// display stays on A while B's separate session is ingested.
+	waitState(t, s, func(v Summary) bool { return v.CurrentSystem == "Fixture A" && !v.ImportInProgress })
+	// A is the sole commander when the initial import completes and becomes
+	// the default; the display stays on A while B's separate session is
+	// ingested. (Had B appeared during the import, both would be ambiguous
+	// and the launcher would ask once instead.)
+	if d := s.Accounts().Default; d != "SYNTHETIC-A" {
+		t.Fatalf("sole imported commander not adopted: %q", d)
+	}
 	appendEvent(t, dir, `{"event":"LoadGame","FID":"SYNTHETIC-B"}`)
 	waitState(t, s, func(v Summary) bool { return v.EventsRead == 3 && v.CurrentSystem == "Fixture A" })
 	appendEvent(t, dir, `{"event":"Location","StarSystem":"Fixture B"}`)
