@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"github.com/Jakoczig/eridion/go/internal/history"
+	"github.com/Jakoczig/eridion/go/internal/privatefs"
+	"net/http"
 	"path/filepath"
 	"testing"
 )
@@ -215,5 +217,92 @@ func TestAccountConsentFailureRetainsNamespaceAndRetry(t *testing.T) {
 	}
 	if m.secrets["edsm"].APIKey != "A-PRIVATE" || !m.states["edsm"].config.Read || len(m.states["edsm"].queue) != 0 {
 		t.Fatal("A state not restored or queue resurrected")
+	}
+}
+
+// After a restore every account namespace stays paused across switches and
+// restarts; no transport activity occurs, and renewing one account's consent
+// does not renew another's.
+func TestAuditRestoreAccountSwitchStaysPaused(t *testing.T) {
+	dir := t.TempDir()
+	calls := 0
+	client := &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		return nil, errors.New("synthetic transport: no network in tests")
+	})}
+	db, e := history.Open(dir)
+	if e != nil {
+		t.Fatal(e)
+	}
+	m := New(context.Background(), dir, Options{Vault: &testVault{}, Manual: true, Client: client})
+	if e = m.AttachHistory(db, history.ProviderSeed{FID: "FIXTURE-A", Name: "A"}); e != nil {
+		t.Fatal(e)
+	}
+	for _, fid := range []string{"FIXTURE-A", "FIXTURE-B"} {
+		if e = m.ActivateAccount(fid, false); e != nil {
+			t.Fatal(e)
+		}
+		if e = m.Configure("edsm", Config{Read: true}); e != nil {
+			t.Fatal(e)
+		}
+	}
+	if e = m.ActivateAccount("FIXTURE-A", false); e != nil {
+		t.Fatal(e)
+	}
+	backupDir := t.TempDir()
+	privatefs.Prepare(backupDir)
+	backup := filepath.Join(backupDir, "fixture.sqlite")
+	if _, e = db.Backup(context.Background(), backup); e != nil {
+		t.Fatal(e)
+	}
+	if e = db.StageRestore(context.Background(), backup); e != nil {
+		t.Fatal(e)
+	}
+	m.Close()
+	db.Close()
+	for restart := 0; restart < 2; restart++ {
+		db, e = history.Open(dir)
+		if e != nil {
+			t.Fatal(e)
+		}
+		m = New(context.Background(), dir, Options{Vault: &testVault{}, Manual: true, Client: client})
+		if e = m.AttachHistory(db, history.ProviderSeed{FID: "FIXTURE-A", Name: "A"}); e != nil {
+			t.Fatal(e)
+		}
+		for _, fid := range []string{"FIXTURE-A", "FIXTURE-B", "FIXTURE-A"} {
+			if e = m.ActivateAccount(fid, false); e != nil {
+				t.Fatal(e)
+			}
+			if c := m.states["edsm"].config; !c.Paused || c.Upload {
+				t.Fatalf("restart %d %s consent revived: %+v", restart, fid, c)
+			}
+		}
+		m.Close()
+		db.Close()
+	}
+	db, e = history.Open(dir)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer db.Close()
+	m = New(context.Background(), dir, Options{Vault: &testVault{}, Manual: true, Client: client})
+	defer m.Close()
+	if e = m.AttachHistory(db, history.ProviderSeed{FID: "FIXTURE-A", Name: "A"}); e != nil {
+		t.Fatal(e)
+	}
+	if e = m.ActivateAccount("FIXTURE-A", false); e != nil {
+		t.Fatal(e)
+	}
+	if e = m.Configure("edsm", Config{Read: true}); e != nil {
+		t.Fatal(e)
+	}
+	if e = m.ActivateAccount("FIXTURE-B", false); e != nil {
+		t.Fatal(e)
+	}
+	if !m.states["edsm"].config.Paused {
+		t.Fatal("renewing A renewed B")
+	}
+	if calls != 0 {
+		t.Fatalf("restored state caused %d transport calls before explicit renewal", calls)
 	}
 }
