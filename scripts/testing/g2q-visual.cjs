@@ -31,7 +31,8 @@ async function main () {
       if (Math.abs(geometry.ratio - 0.2) > 0.015) throw Error('Tile viewport stretched by outer projection CSS: ' + JSON.stringify(geometry))
       if (!await evaluate('!!document.querySelector(".go-galaxy-route")')) throw Error('Default route missing')
       if (await evaluate('document.body.textContent.includes("Show Route")')) throw Error('Obsolete route control')
-      if (await evaluate('document.querySelectorAll("[data-marker=current]").length') !== 3) throw Error('Current-system markers missing')
+      const markers = await evaluate('document.querySelectorAll("[data-marker=current]").length')
+      if (markers !== 3) throw Error('Current-system markers missing: ' + JSON.stringify({ markers, path: await evaluate('location.pathname'), context: await rpc('getGoNavigationContext').then(v => ({ current: v?.navigation?.current?.name || null, fresh: v?.navigation?.fresh, mode: v?.navigation?.mode })).catch(e => e.message), accounts: await rpc('getGoAccounts').then(v => ({ choiceRequired: v.choiceRequired, defaultRequired: v.defaultRequired, recovery: v.recovery, cards: v.cards.length })).catch(e => e.message) }))
       await shot('overlays-' + name); report.pages.push({ name, dpr, geometry, alwaysVisibleRoute: true })
     }
     // Mount the exact canvas module in a tiny test-only hook host. Real DOM,

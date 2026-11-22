@@ -31,9 +31,6 @@ type EffectiveFact struct {
 	Alternatives []FactEvidence `json:"alternatives"`
 }
 
-// factSources are the evidence sources that can write field provenance.
-var factSources = []string{"journal", "frontier", "inara"}
-
 // currentFactEvidence selects, for every field and source, the single
 // chronologically best observation. Selection is per source; cross-source
 // authority is applied afterwards by EffectiveFacts. Each lookup uses the
@@ -45,14 +42,31 @@ func (s *Store) currentFactEvidence(ctx context.Context, fid, entity string, now
 	}
 	cutoff := observationCutoff(now)
 	values := map[string][]FactEvidence{}
-	fields := make([]string, 0, len(allowedFacts)+1)
-	for f := range allowedFacts {
-		fields = append(fields, f)
+	// Enumerate only the field/source groups that have evidence (a covering
+	// index scan), then select each group's best observation with indexed
+	// lookups, so the number of queries tracks the evidence actually held.
+	groupRows, err := s.reader.QueryContext(ctx, "SELECT DISTINCT field,source FROM field_provenance WHERE commander_fid IS ? AND entity=? LIMIT 256", owner, entity)
+	if err != nil {
+		return nil, err
 	}
-	fields = append(fields, "rankProgress")
-	sort.Strings(fields)
-	for _, field := range fields {
-		for _, source := range factSources {
+	type group struct{ field, source string }
+	var groups []group
+	for groupRows.Next() {
+		var g group
+		if err = groupRows.Scan(&g.field, &g.source); err != nil {
+			groupRows.Close()
+			return nil, err
+		}
+		groups = append(groups, g)
+	}
+	err = groupRows.Err()
+	groupRows.Close()
+	if err != nil {
+		return nil, err
+	}
+	for _, g := range groups {
+		field, source := g.field, g.source
+		{
 			var key sql.NullString
 			if err := s.reader.QueryRowContext(ctx, "SELECT max(observed_key) FROM field_provenance WHERE commander_fid IS ? AND entity=? AND field=? AND source=? AND observed_key<>'' AND observed_key<=?", owner, entity, field, source, cutoff).Scan(&key); err != nil {
 				return nil, err
