@@ -244,3 +244,27 @@ func TestAuditCurrentShipAuthority(t *testing.T) {
 		}
 	}
 }
+
+// Journal ranks known only to the live reducer (startup prelude events that
+// precede LoadGame never reach commander provenance) still resolve at the
+// journal tier; Frontier keeps precedence and progress stays level-coherent.
+func TestAuditMergeJournalRanks(t *testing.T) {
+	three, four, twentySeven := "3", "4", "27"
+	journal := []JournalRank{{Category: "Combat", Rank: &three, Progress: &twentySeven}, {Category: "Trade", Rank: &four}}
+	got := MergeJournalRanks(nil, journal)
+	combat, trade := rankByCategory(got, "combat"), rankByCategory(got, "trade")
+	if combat == nil || combat.Rank != "3" || combat.Source != "journal" || combat.Progress == nil || *combat.Progress != "27" {
+		t.Fatalf("journal-only combat = %+v", combat)
+	}
+	if trade == nil || trade.Progress != nil {
+		t.Fatalf("journal-only trade = %+v", trade)
+	}
+	frontier := []ResolvedRank{{Category: "combat", Rank: "8", Source: "frontier", Authority: "frontier"}}
+	if c := rankByCategory(MergeJournalRanks(frontier, journal), "combat"); c.Rank != "8" || c.Progress != nil {
+		t.Fatalf("Frontier 8 inherited journal 3's progress: %+v", c)
+	}
+	same := []ResolvedRank{{Category: "combat", Rank: "3", Source: "frontier", Authority: "frontier"}}
+	if c := rankByCategory(MergeJournalRanks(same, journal), "combat"); c.Progress == nil || *c.Progress != "27" || c.ProgressSource != "journal" {
+		t.Fatalf("same-level progress lost: %+v", c)
+	}
+}

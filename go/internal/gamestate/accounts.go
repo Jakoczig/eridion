@@ -9,6 +9,7 @@ import (
 	"github.com/Jakoczig/eridion/go/internal/history"
 	"github.com/Jakoczig/eridion/go/internal/privatefs"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -332,7 +333,11 @@ func (s *Service) CommanderOverview(ctx context.Context) (map[string]any, error)
 	out["facts"] = facts
 	// D0: ranks and current ship identity come from the same resolver as every
 	// other commander fact; the journal view is only the fallback.
-	out["ranks"] = history.ResolveRanks(facts)
+	journalRanks := []history.JournalRank{}
+	for _, r := range s.views.activity.View(fid).Commander.Ranks {
+		journalRanks = append(journalRanks, history.JournalRank{Category: r.Category, Rank: decimalText(r.Rank), Progress: decimalText(r.Progress)})
+	}
+	out["ranks"] = history.MergeJournalRanks(history.ResolveRanks(facts), journalRanks)
 	ship := s.shipIdentityLocked(ctx, fid, facts)
 	out["shipName"], out["shipType"], out["identitySource"] = ship.Name, ship.ModelLabel, ship.Source
 	if current, ok := history.ResolveCurrentShip(facts); ok {
@@ -355,4 +360,13 @@ func (s *Service) CommanderOverview(ctx context.Context) (map[string]any, error)
 		out["squadron"] = squad.Current
 	}
 	return out, nil
+}
+
+// decimalText renders a reducer integer value as exact decimal text.
+func decimalText(v *float64) *string {
+	if v == nil {
+		return nil
+	}
+	text := strconv.FormatFloat(*v, 'f', -1, 64)
+	return &text
 }

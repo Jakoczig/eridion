@@ -280,3 +280,50 @@ func ResolveCurrentShip(facts []EffectiveFact) (CurrentShipIdentity, bool) {
 	}
 	return CurrentShipIdentity{}, false
 }
+
+// JournalRank is a rank level/progress pair from the live journal reducer
+// (exact decimal text; nil means unknown).
+type JournalRank struct {
+	Category       string
+	Rank, Progress *string
+}
+
+// MergeJournalRanks adds journal-tier evidence known only to the live reducer
+// (for example startup Rank/Progress written before LoadGame, which commander
+// provenance cannot attribute). Categories already resolved keep their
+// source; journal progress attaches only when the journal level equals the
+// effective level.
+func MergeJournalRanks(resolved []ResolvedRank, journal []JournalRank) []ResolvedRank {
+	out := append([]ResolvedRank{}, resolved...)
+	for _, j := range journal {
+		category := rankCategory(j.Category)
+		if category == "" || j.Rank == nil || *j.Rank == "" {
+			continue
+		}
+		found := false
+		for i := range out {
+			if out[i].Category != category {
+				continue
+			}
+			found = true
+			if out[i].Progress == nil && j.Progress != nil && out[i].Rank == *j.Rank {
+				progress := *j.Progress
+				out[i].Progress, out[i].ProgressSource = &progress, "journal"
+			}
+		}
+		if !found {
+			r := ResolvedRank{Category: category, Rank: *j.Rank, Source: "journal", Authority: "journal"}
+			if j.Progress != nil {
+				progress := *j.Progress
+				r.Progress, r.ProgressSource = &progress, "journal"
+			}
+			out = append(out, r)
+		}
+	}
+	index := map[string]int{}
+	for i, c := range rankCategories {
+		index[c] = i
+	}
+	sort.SliceStable(out, func(a, b int) bool { return index[out[a].Category] < index[out[b].Category] })
+	return out
+}
