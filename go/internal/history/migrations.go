@@ -21,7 +21,7 @@ CREATE INDEX requests_provider_time ON provider_requests(provider,id DESC);
 CREATE INDEX station_coordinates ON station_reference(x,y,z);
 CREATE INDEX external_type_entity ON external_snapshots(provider,entity_type,entity_id,id DESC);`}
 
-func init() { migrations = append(migrations, fieldSchema, operationsSchema) }
+func init() { migrations = append(migrations, fieldSchema, operationsSchema, chronologySchema) }
 
 func migrate(db *sql.DB, dir string) error {
 	var count int
@@ -80,6 +80,9 @@ func migrate(db *sql.DB, dir string) error {
 			}
 			if version == 5 {
 				err = backfillOperations(tx)
+			}
+			if version == 6 {
+				err = backfillChronology(tx)
 			}
 		}
 		if err == nil {

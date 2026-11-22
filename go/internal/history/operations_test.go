@@ -57,8 +57,8 @@ func TestG2LOperationsAtomicFleetCarrierEconomy(t *testing.T) {
 		`{"event":"MarketSell","Type":"gold","Count":1,"TotalSale":30,"AvgPricePaid":0}`,
 		`{"event":"CommunityGoal","CurrentGoals":[{"CGID":18446744073709551615,"Title":"Synthetic goal","PlayerContribution":12}]}`,
 		`{"event":"CrewHire","Name":"PRIVATE_CREW","CrewID":18446744073709551615}`)
-	if s.Stats().Schema != 6 {
-		t.Errorf("need schema 6: %v", s.Stats())
+	if s.Stats().Schema != schemaVersion {
+		t.Errorf("need schema %d: %v", schemaVersion, s.Stats())
 	}
 	var state string
 	if e := s.reader.QueryRow("SELECT state FROM fleet_ships WHERE commander_fid='SYNTHETIC' AND ship_id='9007199254740993'").Scan(&state); e != nil || state != "in_transit" {
