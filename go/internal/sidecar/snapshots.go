@@ -99,6 +99,7 @@ func (r *Reader) Poll(ctx context.Context) ([]Change, error) {
 	}
 	return changes, nil
 }
+
 // read performs the bounded safe read, hashing and file-stability checks on
 // every call. Only after those checks pass may an identical verified
 // content hash reuse the previous classification instead of decoding and
