@@ -1,174 +1,199 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="resources/images/title-whitetext.png">
-  <img alt="DAEDALUS Terminal" src="resources/images/title.png" height="100" width="auto"/>
-</picture>
+# ERIDION
 
-<br>
+**A native companion and second-screen interface for Elite Dangerous.**
 
-![GitHub Version](https://img.shields.io/github/v/release/Varzeki/daedalus?display_name=tag&include_prereleases&sort=semver&color=cf7500&style=for-the-badge)
-![GitHub License](https://img.shields.io/github/license/Varzeki/daedalus?color=cf7500&style=for-the-badge)
-![GitHub Downloads](https://img.shields.io/github/downloads/Varzeki/daedalus/total?color=cf7500&style=for-the-badge)
+ERIDION (ERID) brings commander information, ship and fleet data, navigation, exploration, and field tools into one interface for desktop windows and paired displays. The native application is being developed for Windows and Linux, with a shared Go service, a React interface, and local SQLite history.
 
-> **DAEDALUS Terminal** is a fork of [ICARUS Terminal](https://github.com/iaincollins/icarus) by Iain Collins.
-> For the original project, visit [iaincollins/icarus](https://github.com/iaincollins/icarus).
+ERIDION continues the work of [DAEDALUS Terminal](https://github.com/Varzeki/daedalus), itself a fork of [ICARUS Terminal](https://github.com/iaincollins/icarus) by Iain Collins. This repository is the home of ERIDION's development.
 
-## About DAEDALUS Terminal
+[Native development branch][native-branch] · [Preview downloads and status][preview-pr] · [Build from source](#build-the-native-preview) · [Development priorities](#development-priorities) · [License](LICENSE)
 
-_DAEDALUS Terminal is a free, immersive, context-sensitive companion app and second screen interface for [Elite Dangerous](https://www.elitedangerous.com/)._
+## Project status
 
-You can run DAEDALUS Terminal in a native window, on multiple windows/displays, as an overlayed window on top of the game if playing with a VR headset or on an ultra-wide display, or connect remotely in a browser from another computer/tablet/phone/other device (e.g. Chromebook, Android Phone/Tablet, Amazon Fire Tablet). The UI is specifically designed with touch screen devices in mind and adapts the layout of panels to both landscape and portrait displays, both large and small.
+**ERIDION is an experimental developer preview.** The native work is progressing through staged development branches and draft pull requests.
 
-## Features Added in This Fork
+| Track | Where to find it | Status |
+| --- | --- | --- |
+| Native ERIDION | [`go/g3f-galaxy-viewport-slices`][native-branch] and [PR #28][preview-pr] | Current preview described by this README, as of 22 November 2026. |
+| Legacy application | [`main`](https://github.com/Jakoczig/eridion/tree/main) | Contains the inherited application; the native development stack has not been merged here. |
+| Planned corrections | [Development priorities below](#development-priorities) | Agreed direction for subsequent work; these are not claims of completed functionality. |
 
-The following features are exclusive to DAEDALUS Terminal and are not present in the original ICARUS Terminal.
+The native preview has Windows and Linux build and automated verification workflows. Real-game behavior, physical paired devices, and live provider coverage still need acceptance for each relevant change. Preview artifacts are unsigned experimental executables, not a stable ERIDION installer.
 
-### Engineering System
+## What the native preview includes
 
-A complete engineering workflow built into the terminal, based on EDOMH.
+- **Journal and game-state ingestion:** incremental journal reading, supported sidecar data, commander attribution, and persistent local history.
+- **Commander, ship, and fleet workspaces:** observed ship status, owned ships, saved loadouts, stored modules, commander information, and community-goal views.
+- **Navigation and maps:** game-route tracking, jump and FSD context, system views, galaxy density and local XYZ views, and optional cached atlas data.
+- **Exploration assistance:** system and body records, scan information, organic-scan tracking, and a partial native BioScan implementation.
+- **Field tools:** imported route itineraries and progress, journal-derived BGS activity, trade and mining records, materials and engineering workspaces, and supported ship power scenarios.
+- **Multiple displays:** native desktop windows plus HTTPS browser pairing for a second computer, tablet, or phone.
+- **Optional integrations:** provider controls, separate read and publication consent, cached reference data, and account-linked services where supported.
 
-* Wishlist
-* Smart Routing
-* Engineer Status Tracking
-* Trading Logic
+Coverage varies by feature. Ship and module identification, fleet completeness, data precedence, biological prediction rules, display permissions, and parts of the interface are under correction. Unknown or unsupported values should remain visible as unknown. Existing native helpers implement selected workflows; ERIDION does not run arbitrary EDMC Python plugins.
 
-### Exobiology Predictor
+### Try a preview
 
-A full featured prediction system based on formulas from SRVSurvey, BioInsights, and Exploration Buddy.
+1. Open [the current preview PR][preview-pr] for its source commit, CI results, artifact links, and packaging notes.
+2. Extract the appropriate Windows x64 or Linux x64 archive into its own directory. Check the supplied `SHA256SUMS` and the PR's verification notes.
+3. Run `eridion.exe` on Windows or `eridion` from a Linux graphical session. Configure the journal location and the services you want to use.
 
-* Probabilities in percent
-* On-planet bio scanner to help locate and scan different colonies
-* Optimised prediction based on existing community methods
+GitHub Actions downloads may require sign-in and are retained for a limited time. Some archive milestone labels lag the source revision. Use the artifact linked from the matching workflow run and its recorded source/checkout information; archive labels alone do not identify a build. The [preview prerequisites][preview-setup] and [pairing guide][pairing-guide] provide setup details. Older milestone documents describe the behavior at that milestone.
 
-### Exploration 
+| Platform | Runtime requirements |
+| --- | --- |
+| Windows x64 | Windows 10/11 and Microsoft Edge WebView2 Runtime. |
+| Linux x64 | GTK 4, WebKitGTK 6, and a graphical session with session D-Bus. Stored provider credentials also require an unlocked Secret Service and `secret-tool`. |
 
-An exploration tool based on Exploration Buddy.
+The native application keeps its own profile and history. Preserve an existing installation and profile when trying a new experimental build.
 
-* Auto-tab switching based on ingame state
-* Route analysis
-* System body analysis and highlighting
+## Build the native preview
 
-### COVAS Verity Voiceover
+These instructions select the native development branch explicitly. A default clone of `main` still contains the legacy application.
 
-An extension of the existing ingame Verity COVAS
+### Prerequisites
 
-* Original ingame voicelines play in harmony with extended voicelines, using a queue to prevent overlap
-* Additional events trigger extended audio voicelines, such as low fuel, valuable bodies found, warnings, etc.
-* Fully configurable
+- Git.
+- Node.js and npm to build the interface. The native CI currently uses **Node.js 24.22.1**.
+- **Go 1.26.10**, matching the toolchain in [`go/go.mod`][go-module].
+- A C compiler with CGO enabled for SQLite. Windows builds need a compatible GCC/MinGW toolchain on `PATH`.
+- The runtime requirements above. Linux builds also need development packages; the Ubuntu 24.04 CI installs `build-essential`, `pkg-config`, `libgtk-4-dev`, and `libwebkitgtk-6.0-dev`.
 
-### Landing Pad Overlay
+The native build embeds the React assets and uses Wails v3. It does not require a separately running Node service or an EDMC/Python runtime.
 
-Visual overlays showing pad layouts for all major station types, based on the EDMC plugin LandingPad:
+### Fetch the source and build the interface
 
-The overlay highlights your assigned pad based on the docking grant in your journal.
+```sh
+git clone --branch go/g3f-galaxy-viewport-slices --single-branch https://github.com/Jakoczig/eridion.git
+cd eridion
+npm ci
+npm run build:go-assets
+cd go
+go mod download
+go mod verify
+```
 
-### Journal and Connectivity Improvements
+### Build and run on Windows — PowerShell
 
-* Incremental journal log reading with 250 ms polling — new journal entries are detected immediately without re-reading the whole file.
-* EDSM integration with automatic retry on transient failures.
-* Improved event parsing for exploration and biological scan events.
+From the `go` directory:
 
----
+```powershell
+$env:CGO_ENABLED = "1"
+go build -o bin/eridion.exe ./cmd/daedalus
+.\bin\eridion.exe
+```
 
-## Screenshots
+### Build and run on Linux
 
-<img alt="Navigation Map" src="resources/images/screenshots/nav-map.png" height="auto" width="98.5%"/>
+From the `go` directory:
 
-<img alt="Navigation List" src="resources/images/screenshots/nav-list.png" height="auto" width="49%"/> <img alt="Ship Status" src="resources/images/screenshots/ship-status.png" height="auto" width="49%"/>
-<img alt="Exploration System" src="resources/images/screenshots/exploration-system.png" height="auto" width="49%"/> <img alt="Exploration Route" src="resources/images/screenshots/exploration-route.png" height="auto" width="49%"/>
-<img alt="Blueprint" src="resources/images/screenshots/blueprint.png" height="auto" width="49%"/> <img alt="Navigation Route" src="resources/images/screenshots/nav-route.png" height="auto" width="49%"/>
-<img alt="Log" src="resources/images/screenshots/log.png" height="auto" width="49%"/> <img alt="Materials" src="resources/images/screenshots/materials.png" height="auto" width="49%"/>
+```sh
+CGO_ENABLED=1 go build -o bin/eridion ./cmd/daedalus
+./bin/eridion
+```
 
-## Requirements
+If Ubuntu 24.04 reports a WebKit `bwrap` or user-namespace startup error, follow the [Linux startup note][linux-startup] for an AppArmor profile scoped to the built executable. Keep WebKit's sandbox enabled.
 
-The self-contained installer is around 20 MB and has no dependencies. If you are running an older but supported release of Windows, any missing dependencies will be automatically installed.
+The source entry point is still named `cmd/daedalus` for compatibility; the application is ERIDION. If journal discovery needs an override, pass `--journal-dir "/path/to/Elite Dangerous journals"`. Use `--data-dir "/path/to/separate-profile"` when an isolated development profile is needed.
 
-* Windows 10 or newer required.
-* No dependencies are required to install the application.
-* No manual configuration or setup is required — it will automatically find your game data.
-* No additional disk space is required to store game data. Recent game data is loaded into memory when launched and streamed in real time when the game is active; it is not persisted or cached to disk.
+The [native desktop workflow][native-workflow] is the executable reference for build dependencies and verification. [BUILD.md](BUILD.md) primarily documents the legacy application: `npm start`, `npm run dev`, `npm run build`, and `npm run build:standalone` use that older path.
 
-### Notes
+## Data and external services
 
-* The application will run against the latest version of Elite Dangerous (Odyssey) and older releases (e.g. Horizons), but it is currently explicitly designed for use with the latest versions. Changes to the game API may impact functionality when using DAEDALUS Terminal with older versions of the game.
-* The application includes a web interface to allow access from remote devices. The web interface is enabled by default while the application is running.
+The native preview stores journal history, derived game state, and configuration locally. It is not a memory-only application. Provider credentials use operating-system protection: Windows DPAPI or a Linux Secret Service-backed encrypted vault.
 
-The web interface relies on advanced browser functionality for rendering and works best on native Google Chrome browsers (e.g. Google Chrome for Windows, Mac, ChromeOS, Android). Other browsers (e.g. Safari, Firefox, Chromium) may use fallback rendering and/or lack required features for full compatibility / optimal user experience.
+External access is optional. Read access and publication are separately controlled; enabling reads does not enable uploads. Depending on the selected service and publication category, requests can include game information and commander identifiers. Each provider also receives ordinary connection metadata such as the request's IP address.
 
-## Developer Documentation
+| Service | Native integration scope |
+| --- | --- |
+| Frontier | OAuth and supported Companion API reads for the connected account. Endpoint availability and freshness vary; login success alone does not validate every field. |
+| EDSM | Reference lookups and supported account/journal workflows, subject to their respective controls. |
+| EDDN and EDAstro | Supported publication adapters with explicit consent and category controls. Their presence does not imply complete event coverage or production acceptance. |
+| Inara | An adapter exists, but application approval and API-contract corrections remain outstanding. Full working synchronization is not claimed. |
+| Spansh, Canonn, EliteBGS, and Raven | Selected reference-data capabilities. Spansh currently uses website workflows and local CSV itineraries; native in-app route generation is planned. |
 
-For developer documentation see [BUILD.md](BUILD.md).
+See the [provider capability definitions][provider-capabilities], [Frontier connection contract][frontier-contract], and [persistent history and integration handoff][history-handoff] for implementation details.
 
-### Developer Quickstart
+Paired displays use HTTPS and explicit pairing. The current preview still restricts some paired-display information and actions. Equal gameplay access on all trusted displays, with configuration confined to the launcher, is part of the correction plan below.
 
-If you are running on Linux and/or looking for quick instructions on how to run from source, if you have [Node.js](https://nodejs.org/en/) this is what you need to do to download and install DAEDALUS Terminal:
+## Development priorities
 
-    git clone git@github.com:YOUR_USERNAME/daedalus.git
-    cd daedalus
-    npm install
+These requirements guide the next corrections and feature work. They are deliberately separate from the implemented preview features above.
 
-Next, run `cp .env-example .env` to create an `.env` file and edit it to change the `LOG_DIR` option to point to the location of your Elite Dangerous log files:
+| Area | Intended behavior |
+| --- | --- |
+| Data authority | **Valid live Frontier data first; journal and Status evidence second; Inara and every other provider at the same third priority.** Preserve identity, source, observation time, and freshness so stale or unrelated data cannot replace valid current facts. |
+| Commander selection | Automatically select the configured default commander when multi-commander mode is off. Keep multi-commander selection explicit and account data isolated. |
+| Trusted displays and settings | Give every paired display the same gameplay information and operational access as the main display. Keep all configuration in the launcher. A legitimate commander change should update trusted displays consistently. |
+| Exosuit and fleet accuracy | Add a separate **Commander → Exosuit** tab for the known suit, loadout, and attributable live on-foot data. Keep suits, ships, SRVs, and fighters distinct; correct missing fleet entries, ship names, and outfitted-module identification. |
+| Spansh route planning | Plan routes inside ERIDION, fill the current location with one action, and import the result directly. An active Spansh itinerary takes precedence over the game's route in the Route tab. |
+| Key controls | Add launcher-managed bindings for explicit game actions, starting with ship controls such as landing gear and later a next-waypoint action that opens the galaxy map, searches, selects, and plots. These game-input actions are not implemented in the current native preview. |
+| Native helpers | Add controllable native integrations for relevant EDMC workflows, including the **LandingPad** docking helper. Review current upstream algorithms and licenses, then verify native behavior against them. Full plugin parity is not assumed. |
+| Performance | Measure startup, replay, CPU, memory, storage, and display latency. Keep ingestion and state shared; make normal display updates follow the visible tab, with an optional low-latency mode that prepares all views. |
+| API and algorithm maintenance | Audit every service against its current documented contract, including Inara. Check upstream data and algorithm revisions during build maintenance, pin reviewed updates, and verify their behavior before adoption. |
 
-    # LOG_DIR can be used to tell the Service where to look for game logs
-    # This option can be used in development and at runtime
-    LOG_DIR=path/to/logs
+## Development and documentation
 
-With that done, anytime you want to start DAEDALUS Terminal, all you need to do is run:
+| Location on the native branch | Purpose |
+| --- | --- |
+| [`go/`][go-source] | Native desktop host, shared service, journal processing, history, providers, and domain logic. |
+| [`src/client/`][client-source] | Shared React interface and native-service presentation. |
+| [`src/service/`][legacy-source] | Legacy Node service retained during the transition. |
+| [`docs/handoffs/`][handoffs] and [`docs/testing/`][testing] | Milestone scope, limitations, verification notes, and acceptance checklists. |
+| [`docs/licenses/g2k/`][field-credits] | Pinned native field-tool sources and license notices. |
 
-    npm start
+For changes to the native branch, relevant checks include the following, with the build prerequisites installed:
 
-This will run in debug mode which is not quite the same as a production build (it's not as optimised) but should work just fine.
+```sh
+npm test
+npm run lint:security
+npm run lint:go-assets
+npm run test:go-assets
+npm run build:go-assets
+cd go
+go test ./...
+go vet ./...
+```
 
-### Building a Standalone Binary
+The CI workflow contains additional platform, race, smoke, and browser checks. Choose verification appropriate to the change; a documentation edit does not require a complete gameplay test cycle.
 
-The quickest way to produce a runnable binary (no installer needed):
-
-    npm install
-    npm run build:standalone
-
-This outputs a standalone executable in `build/`. See [BUILD.md](BUILD.md) for full build documentation including the Windows installer build.
-
-## Legal
-
-DAEDALUS Terminal is free, open-source software. The original ICARUS Terminal was released under the ISC License by Iain Collins. This fork is licensed under the [GNU General Public License v3.0](LICENSE) due to incorporation of code derived from GPL-3.0 licensed projects.
-
-DAEDALUS Terminal does not record Personally Identifiable Information (PII). DAEDALUS Terminal includes an integration with [EDSM](https://www.edsm.net). Data such as your current in-game location may be sent to EDSM in order to render stellar cartography information in the interface. DAEDALUS Terminal does not expose or send information about you or your in-game character (e.g. your name, user name, commander name, or ship name), but any requests made to a third party will include your IP address.
-
-Elite Dangerous is copyright Frontier Developments plc. This software is not endorsed by nor reflects the views or opinions of Frontier Developments and no employee of Frontier Developments was involved in the making of it.
-
-THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
-REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
-AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
-INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
-LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
-OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
-PERFORMANCE OF THIS SOFTWARE.
+For bug reports, include the build commit, operating system, affected view, expected behavior, and reproduction steps. Remove commander identifiers and other private information from shared journals or diagnostics, and never include credentials.
 
 ## Credits
 
-_DAEDALUS Terminal would not be possible without the original [ICARUS Terminal](https://github.com/iaincollins/icarus) by Iain Collins, and work from dozens of enthusiasts and hundreds of open source contributors._
+ERIDION builds on years of work by the Elite Dangerous tools community:
 
-* The original name ICARUS was suggested by [SpaceNinjaBear](https://www.reddit.com/user/SpaceNinjaBear) on Reddit.
-* Loading animation by [James Panter](http://codepen.io/jpanter/pen/PWWQXK).
-* Includes original icons, icons inspired by those found in Elite Dangerous, and icons based on those from [edassets.org](https://edassets.org).
-* Uses stellar cartography data from the [EDSM API](https://www.edsm.net).
-* Includes game data collated and provided by [EDCD](https://github.com/EDCD/FDevIDs).
-* The [Jura font](https://fonts.google.com/specimen/Jura#glyphs) is included under the Open Font License.
-* Thank you to [Serge Zaitsev](https://github.com/zserge) for his work on the WebView library.
+- **[DAEDALUS Terminal](https://github.com/Varzeki/daedalus)** by Varzeki and **[ICARUS Terminal](https://github.com/iaincollins/icarus)** by Iain Collins — the project's foundation and inherited interface. The ICARUS name was suggested by [SpaceNinjaBear](https://www.reddit.com/user/SpaceNinjaBear).
+- **[EDCD / FDevIDs](https://github.com/EDCD/FDevIDs)** and **[EDSM](https://www.edsm.net)** — game identifiers, community data, and stellar cartography.
+- **[SrvSurvey](https://github.com/njthomson/SrvSurvey)**, **[Elite Observatory BioInsights](https://edjp.colacube.net/observatory)**, and **[Elite Dangerous Exploration Buddy](https://www.panostrede.de/EDEB/)** — inherited exploration and biological-analysis references.
+- **[EDMC-BioScan](https://github.com/Silarn/EDMC-BioScan)** and **[EDMC-ExploData](https://github.com/Silarn/EDMC-ExploData)** — licensed reference rules and biological data used by the native field tools.
+- **[BGS-Tally](https://github.com/aussig/BGS-Tally)** and **[Neutron Dancer](https://github.com/dwomble/EDMC-NeutronDancer)** — field-activity and itinerary workflow references.
+- **[Elite Dangerous Odyssey Materials Helper](https://github.com/jixxed/ed-odyssey-materials-helper)** — inherited engineer imagery and engineering-workflow references.
+- **[LandingPad](https://github.com/bgol/LandingPad)** — inherited docking-layout references and the selected reference for the planned native docking helper.
+- **[Canonn Research Group](https://canonn.science/)**, **[Spansh](https://spansh.co.uk/)**, **[Inara](https://inara.cz/)**, and the historical **EDDB** project — community research, services, and reference material.
+- **[James Panter](https://codepen.io/jpanter/pen/PWWQXK)** — the inherited loading animation; **[edassets.org](https://edassets.org)** — icon references; **[Jura](https://fonts.google.com/specimen/Jura)** — the bundled font under the Open Font License; **[Serge Zaitsev](https://github.com/zserge)** — foundational WebView work.
 
-### Fork Credits
+See the [native field-tool credits and retained notices][field-credits] for exact pinned sources, licenses, and integration limits. A reference or credit does not imply full feature parity or endorsement.
 
-This fork adds features built on the work of the following projects and communities:
+## License and game attribution
 
-* **[SrvSurvey](https://github.com/njthomson/SrvSurvey)** by njthomson — biological species prediction criteria, exploration value algorithms, and settlement template pad positions. Licensed under [GPL-3.0](https://github.com/njthomson/SrvSurvey/blob/main/LICENSE).
-* **[elite-dangerous-odyssey-materials-helper](https://github.com/jixxed/ed-odyssey-materials-helper)** by jixxed — engineer portrait images used in the Engineer Cards page along with workflow layout and design used to create the engineering portion. Licensed under [MIT](https://github.com/jixxed/ed-odyssey-materials-helper/blob/master/LICENSE).
-* **[LandingPad](https://github.com/bgol/LandingPad)** by bgol — reference for starport and fleet carrier pad layout templates used in the Landing Pad Overlay, as well as logic.
-* **[Canonn Research Group](https://canonn.science/)** — species observation data, codex imagery, and community research used in the biological predictor.
-* **[Spansh](https://spansh.co.uk/)** — system and body data API used for material trader routes and powerplay system data.
-* **[Elite Observatory BioInsights](https://edjp.colacube.net/observatory)**  — methodology reference for bio signal analysis and species criteria.
-* **[Elite Dangerous Exploration Buddy](https://www.panostrede.de/EDEB/)** — reference for exploration body value calculations.
-* **[EDDB](https://eddb.io/)** — Elite Dangerous Database; a community resource for station, commodity, and engineer data that informed many design decisions in this project.
-* **[INARA](https://inara.cz/)** — Elite Dangerous companion site providing commander profiles, engineering data, and community knowledge referenced during development.
+ERIDION is free, open-source software under **GPL-3.0-or-later**; see [LICENSE](LICENSE). The original ICARUS Terminal was released under the ISC License, and third-party components retain their respective licenses and notices.
 
-Thank you to all those who have created and supported libraries on which this software depends and to Frontier Developments for supporting third party tools.
+Elite Dangerous is copyright Frontier Developments plc. ERIDION is an independent community project and is not affiliated with or endorsed by Frontier Developments. The software is provided without warranty as described in its license.
 
-
+[native-branch]: https://github.com/Jakoczig/eridion/tree/go/g3f-galaxy-viewport-slices
+[preview-pr]: https://github.com/Jakoczig/eridion/pull/28
+[preview-setup]: https://github.com/Jakoczig/eridion/blob/go/g3f-galaxy-viewport-slices/docs/testing/g3e-map-refinement-preview.md
+[pairing-guide]: https://github.com/Jakoczig/eridion/blob/go/g3f-galaxy-viewport-slices/docs/testing/g1b-secure-remote-displays.md
+[linux-startup]: https://github.com/Jakoczig/eridion/blob/go/g3f-galaxy-viewport-slices/docs/testing/g1a-windows-linux-smoke.md#build-prerequisites
+[go-module]: https://github.com/Jakoczig/eridion/blob/go/g3f-galaxy-viewport-slices/go/go.mod
+[native-workflow]: https://github.com/Jakoczig/eridion/blob/go/g3f-galaxy-viewport-slices/.github/workflows/go-desktop.yml
+[provider-capabilities]: https://github.com/Jakoczig/eridion/blob/go/g3f-galaxy-viewport-slices/go/internal/providers/types.go
+[frontier-contract]: https://github.com/Jakoczig/eridion/blob/go/g3f-galaxy-viewport-slices/docs/protocols/eridion-frontier-website-return.md
+[history-handoff]: https://github.com/Jakoczig/eridion/blob/go/g3f-galaxy-viewport-slices/docs/handoffs/g2j-persistent-history-integrations.md
+[go-source]: https://github.com/Jakoczig/eridion/tree/go/g3f-galaxy-viewport-slices/go
+[client-source]: https://github.com/Jakoczig/eridion/tree/go/g3f-galaxy-viewport-slices/src/client
+[legacy-source]: https://github.com/Jakoczig/eridion/tree/go/g3f-galaxy-viewport-slices/src/service
+[handoffs]: https://github.com/Jakoczig/eridion/tree/go/g3f-galaxy-viewport-slices/docs/handoffs
+[testing]: https://github.com/Jakoczig/eridion/tree/go/g3f-galaxy-viewport-slices/docs/testing
+[field-credits]: https://github.com/Jakoczig/eridion/tree/go/g3f-galaxy-viewport-slices/docs/licenses/g2k
