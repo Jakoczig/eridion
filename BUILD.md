@@ -75,7 +75,7 @@ The inherited application has a React/Next.js client, a Node service, and a Wind
 
 ### Run the legacy development service
 
-Use Node.js 24 and npm, matching the legacy packaging target and current workflow family. From a checkout containing the legacy source:
+Use Node.js 24 and npm, matching the declared Node 24 engine range and packaging target. The main-branch workflows pin Node.js 24.22.1 and Go 1.26.10. From a checkout containing the legacy source:
 
 ```sh
 npm ci
@@ -128,7 +128,7 @@ The wrapper and service must be kept with their required companion files. The in
 | `npm run build:assets` | Rebuild assets and derived data. |
 | `npm run build:clean` | Remove generated build output. |
 
-The example environment defaults code signing off. Enable signing only with a certificate you control and the required signing tool configuration. The manually dispatched release workflow publishes a GitHub release; it is not a build-only check.
+The example environment defaults code signing off. Enable signing only with a certificate you control and the required signing tool configuration. The manually dispatched workflow in `.github/workflows/release.yml` now builds **legacy installer review artifacts only**. It records the checkout commit, package/tool versions, media-helper pins, and checksums, then uploads an expiring artifact. It has read-only repository permissions and creates no release or tag. The installed binaries retain their inherited DAEDALUS names. See the [package and workflow maintenance note](docs/maintenance/package-and-workflows.md).
 
 ### Legacy standalone service
 

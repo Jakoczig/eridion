@@ -1,77 +1,95 @@
-name: CI
+name: ERIDION legacy compatibility CI
 
+# main still contains the inherited application. Native Go/Wails checks live
+# on the native development stack; this workflow does not claim native coverage.
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '24.22.1'
+  GO_VERSION: '1.26.10'
+
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    name: Legacy JavaScript lint (advisory)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
-
-      - name: Cache node_modules
-        id: cache-node-modules
-        uses: actions/cache@v4
-        with:
-          path: node_modules
-          key: node-modules-linux-${{ hashFiles('package-lock.json') }}
-
-      - name: Install dependencies
-        if: steps.cache-node-modules.outputs.cache-hit != 'true'
-        run: npm ci --loglevel=error
-
-      - name: Lint JavaScript (advisory)
-        run: npx standard "src/**/*.js" || true
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci --loglevel=error
+      - name: Report inherited lint findings without blocking the build
+        run: npx --no-install standard "src/**/*.js"
 
   build-client:
-    runs-on: ubuntu-latest
+    name: Shared client build and package metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
-
-      - name: Cache node_modules
-        id: cache-node-modules
-        uses: actions/cache@v4
-        with:
-          path: node_modules
-          key: node-modules-linux-${{ hashFiles('package-lock.json') }}
-
-      - name: Install dependencies
-        if: steps.cache-node-modules.outputs.cache-hit != 'true'
-        run: npm ci --loglevel=error
-
-      - name: Cache Next.js build
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Check package and lockfile root metadata
+        shell: bash
+        run: |
+          node <<'NODE'
+          const assert = require('node:assert/strict')
+          const pkg = require('./package.json')
+          const lock = require('./package-lock.json')
+          const root = lock.packages['']
+          for (const key of ['name', 'version']) assert.equal(lock[key], pkg[key], `lockfile ${key}`)
+          for (const key of ['name', 'version', 'license', 'engines', 'dependencies', 'devDependencies']) {
+            assert.deepEqual(root[key], pkg[key], `lockfile root ${key}`)
+          }
+          console.log('Package and lockfile root metadata agree.')
+          NODE
+      - run: npm ci --loglevel=error
+      - name: Cache Next.js build work
         uses: actions/cache@v4
         with:
           path: src/client/.next/cache
-          key: nextjs-${{ hashFiles('src/client/**/*.js', 'src/client/**/*.css') }}
-          restore-keys: nextjs-
-
-      - name: Build client
-        run: cd src/client && npx next build && npx next export -o ../../build/client
+          key: nextjs-${{ runner.os }}-node${{ env.NODE_VERSION }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('src/client/**/*.js', 'src/client/**/*.css') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-node${{ env.NODE_VERSION }}-${{ hashFiles('package-lock.json') }}-
+      - run: npm run build:client
 
   build-app:
+    name: Legacy Windows wrapper build and startup check
     runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
-
-      - name: Compile Go app
-        run: cd src/app && go build -ldflags="-H windowsgui -s -w" -o ../../build/test-app.exe
-
-      - name: Smoke test app binary
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: src/app/go.sum
+      - name: Compile the legacy Windows wrapper
+        run: |
+          Set-Location src/app
+          go build -ldflags="-H windowsgui -s -w" -o ../../build/test-app.exe
+      - name: Check the legacy wrapper starts
         run: .\build\test-app.exe --smoke-test

@@ -1,141 +1,158 @@
-name: Release
+name: ERIDION legacy installer artifacts
 
+# Retained manual packaging of the inherited Windows application.
+# This workflow uploads review artifacts; it creates no Git tag or release.
 on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '24.22.1'
+  GO_VERSION: '1.26.10'
+  SIGN_BUILD: 'false'
+  YT_DLP_URL: https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe
+  YT_DLP_SHA256: f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d
+  FFMPEG_URL: https://github.com/GyanD/codexffmpeg/releases/download/9.1/ffmpeg-9.1-essentials_build.zip
+  FFMPEG_SHA256: b9bbbb3acece000cbeec994f856649354e52c773807841e78908374b24d658fd
 
 jobs:
-  # ── Job 1: Build Next.js client on fast Ubuntu runner ──
   build-client:
-    runs-on: ubuntu-latest
+    name: Build the shared interface for legacy packaging
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
-
-      - name: Cache node_modules
-        id: cache-node-modules
-        uses: actions/cache@v4
-        with:
-          path: node_modules
-          key: node-modules-linux-${{ hashFiles('package-lock.json') }}
-
-      - name: Install dependencies
-        if: steps.cache-node-modules.outputs.cache-hit != 'true'
-        run: npm ci --loglevel=error
-
-      - name: Cache Next.js build
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci --loglevel=error
+      - name: Cache Next.js build work
         uses: actions/cache@v4
         with:
           path: src/client/.next/cache
-          key: nextjs-${{ hashFiles('src/client/**/*.js', 'src/client/**/*.css') }}
-          restore-keys: nextjs-
-
-      - name: Build client
-        run: npm run build:client
-
-      - name: Upload client build
-        uses: actions/upload-artifact@v4
+          key: nextjs-${{ runner.os }}-node${{ env.NODE_VERSION }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('src/client/**/*.js', 'src/client/**/*.css') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-node${{ env.NODE_VERSION }}-${{ hashFiles('package-lock.json') }}-
+      - run: npm run build:client
+      - uses: actions/upload-artifact@v4
         with:
-          name: build-client
+          name: legacy-client-${{ github.run_id }}-${{ github.run_attempt }}
           path: build/client
+          if-no-files-found: error
           retention-days: 1
 
-  # ── Job 2: Build app + service, assemble installer, create release ──
-  release:
+  package-legacy:
+    name: Package unsigned legacy Windows installer
     needs: [build-client]
     runs-on: windows-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
-
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
       - uses: actions/setup-go@v5
         with:
-          go-version: 'stable'
-          cache: true
+          go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: src/app/go.sum
-
-      - name: Cache node_modules
-        id: cache-node-modules
-        uses: actions/cache@v4
+      - run: npm ci --loglevel=error
+      - name: Install legacy packaging tools
+        run: choco install nsis upx -y --no-progress
+      - uses: actions/download-artifact@v4
         with:
-          path: node_modules
-          key: node-modules-win-${{ hashFiles('package-lock.json') }}
-
-      - name: Install dependencies
-        if: steps.cache-node-modules.outputs.cache-hit != 'true'
-        run: npm ci --loglevel=error
-
-      - name: Cache UPX and NSIS
-        id: cache-tools
-        uses: actions/cache@v4
-        with:
-          path: |
-            C:\Program Files (x86)\NSIS
-            C:\ProgramData\chocolatey\lib\upx
-            C:\ProgramData\chocolatey\bin\upx.exe
-          key: nsis-upx-v1
-
-      - name: Install NSIS and UPX
-        if: steps.cache-tools.outputs.cache-hit != 'true'
-        run: choco install nsis upx -y
-
-      - name: Build app
-        run: npm run build:app
-
-      - name: Download client build
-        uses: actions/download-artifact@v4
-        with:
-          name: build-client
+          name: legacy-client-${{ github.run_id }}-${{ github.run_attempt }}
           path: build/client
-
-      - name: Cache pkg node binary
+      - name: Cache the packaging runtime download
         uses: actions/cache@v4
         with:
           path: ~/.pkg-cache
-          key: pkg-node24-win-x64-v1
-
-      - name: Download yt-dlp
-        shell: bash
+          key: pkg-${{ runner.os }}-node24-${{ hashFiles('package-lock.json') }}
+      - name: Download and verify pinned media helpers
+        shell: pwsh
         run: |
-          curl -L -o resources/yt-dlp.exe https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe
-          ls -la resources/yt-dlp.exe
-
-      - name: Download ffmpeg
-        shell: bash
-        run: |
-          curl -L -o ffmpeg-release.zip https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
-          unzip -j ffmpeg-release.zip "*/bin/ffmpeg.exe" -d resources/
-          ls -la resources/ffmpeg.exe
-
-      - name: Get version from package.json
-        id: version
-        shell: bash
-        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
-
-      - name: Build service
-        run: npm run build:service
-
-      - name: Smoke test binaries
+          $ErrorActionPreference = 'Stop'
+          Invoke-WebRequest -Uri $env:YT_DLP_URL -OutFile resources/yt-dlp.exe
+          if ((Get-FileHash resources/yt-dlp.exe -Algorithm SHA256).Hash -ine $env:YT_DLP_SHA256) {
+            throw 'yt-dlp checksum mismatch'
+          }
+          $archive = Join-Path $env:RUNNER_TEMP 'eridion-ffmpeg.zip'
+          Invoke-WebRequest -Uri $env:FFMPEG_URL -OutFile $archive
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash -ine $env:FFMPEG_SHA256) {
+            throw 'FFmpeg archive checksum mismatch'
+          }
+          $unpacked = Join-Path $env:RUNNER_TEMP 'eridion-ffmpeg'
+          Expand-Archive -LiteralPath $archive -DestinationPath $unpacked -Force
+          $binaries = @(Get-ChildItem $unpacked -Filter ffmpeg.exe -File -Recurse)
+          if ($binaries.Count -ne 1) { throw 'Expected one FFmpeg executable in the verified archive' }
+          Copy-Item -LiteralPath $binaries[0].FullName -Destination resources/ffmpeg.exe
+      - run: npm run build:app
+      - run: npm run build:service
+      - name: Legacy service startup check (WebView check is skipped by this script in CI)
         run: npm run build:verify
+      - run: npm run build:package
+      - name: Record source identity and artifact checksums
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = Join-Path $PWD 'dist/legacy-artifact'
+          New-Item -ItemType Directory -Path $stage -Force | Out-Null
+          Copy-Item -LiteralPath 'dist/DAEDALUS Setup.exe' -Destination $stage
+          Copy-Item -LiteralPath LICENSE -Destination $stage
+          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+          $metadata = [ordered]@{
+            project = 'ERIDION'
+            implementation = 'inherited DAEDALUS Windows application'
+            packageVersion = $pkg.version
+            sourceCommit = (git rev-parse HEAD).Trim()
+            sourceRef = $env:GITHUB_REF
+            workflowRun = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            workflowAttempt = $env:GITHUB_RUN_ATTEMPT
+            node = (node --version).Trim()
+            npm = (npm --version).Trim()
+            go = (go version).Trim()
+            lockfileSha256 = (Get-FileHash package-lock.json -Algorithm SHA256).Hash.ToLowerInvariant()
+            ytDlp = @{ url = $env:YT_DLP_URL; sha256 = $env:YT_DLP_SHA256 }
+            ffmpeg = @{
+              archiveUrl = $env:FFMPEG_URL
+              archiveSha256 = $env:FFMPEG_SHA256
+              executableSha256 = (Get-FileHash resources/ffmpeg.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+          }
+          $metadata | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $stage 'build-metadata.json') -Encoding utf8NoBOM
+          @'
+          ERIDION legacy compatibility artifact
 
-      - name: Build installer
-        run: npm run build:package
+          This is an experimental unsigned build of the inherited Windows
+          application. Its installer and installed binaries retain DAEDALUS names.
+          It is not the native ERIDION Go/Wails preview or a published release.
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
+          Verify SHA256SUMS and inspect build-metadata.json before use.
+          The packaged service startup check does not establish real-game,
+          installer, native WebView, or paired-display acceptance.
+          '@ | Set-Content (Join-Path $stage 'README.txt') -Encoding utf8NoBOM
+          $checksums = Get-ChildItem $stage -File | Sort-Object Name | ForEach-Object {
+            $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)"
+          }
+          $checksums | Set-Content (Join-Path $stage 'SHA256SUMS') -Encoding utf8NoBOM
+      - name: Upload the legacy installer for review
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: DAEDALUS Terminal v${{ steps.version.outputs.version }}
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-          files: |
-            dist/DAEDALUS Setup.exe
+          name: eridion-legacy-installer-windows-x64-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/legacy-artifact
+          if-no-files-found: error
+          retention-days: 14

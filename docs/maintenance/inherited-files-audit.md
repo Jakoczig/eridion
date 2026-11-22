@@ -4,6 +4,10 @@
 
 **Default-branch baseline:** [eff5fe7][main-before], containing the inherited application plus the rewritten ERIDION README. **Native comparison:** [G3F `864c724`][native-source]. Existing native draft PRs remain pinned to their reviewed source; this cleanup does not merge that stack into `main`.
 
+## Follow-up: package and workflow configuration
+
+The inventory below records the earlier cleanup snapshot. A subsequent [package/workflow review](package-and-workflows.md) corrects four files that were retained at that stage: `package.json`, `package-lock.json`, `.github/workflows/ci.yml`, and `.github/workflows/release.yml`. Their continued use was a reason to keep them, not evidence that their metadata or behavior was current.
+
 ## Result and scope
 
 The default branch contained **1,092 tracked files**. **1,091** met the age cutoff; the ERIDION README was the only newer file. The [complete inventory](inherited-file-inventory.json) assigns a date, category, and disposition to every older file.

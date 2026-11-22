@@ -1,7 +1,7 @@
 {
-  "name": "daedalus",
+  "name": "eridion",
   "version": "2.2.0",
-  "description": "DAEDALUS Terminal for Elite Dangerous",
+  "description": "ERIDION companion for Elite Dangerous: shared interface and legacy build tooling",
   "scripts": {
     "build": "npm run build:client && npm run build:app && npm run build:service && npm run build:verify && npm run build:package",
     "build:verify": "node scripts/build/build-verify.js",
@@ -70,6 +70,12 @@
   },
   "engines": {
     "npm": ">=9.6.7",
-    "node": ">=20"
-  }
+    "node": ">=24 <25"
+  },
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Jakoczig/eridion.git"
+  },
+  "homepage": "https://github.com/Jakoczig/eridion#readme"
 }
