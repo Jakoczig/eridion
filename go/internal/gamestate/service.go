@@ -110,6 +110,10 @@ func NewService(opts Options) (*Service, error) {
 	accounts, accountsError := loadAccountsForService(opts.StorageDir)
 	return &Service{accounts: accounts, accountsError: accountsError, maintenance: make(chan maintenanceRequest), navigationContext: navcontext.New(), views: newProjectionState(), opts: opts, summary: Summary{Stage: initialStage, SourceState: "waiting", ImportInProgress: true}, details: SourceDetails{Override: opts.Directory, Sidecars: map[string]string{}}, commanders: map[string]commanderState{}, subscribers: map[chan Summary]struct{}{}, selectSource: make(chan selection), done: make(chan struct{})}, nil
 }
+// beforeStartupRebuild is a test hook run between restoring a legacy cache
+// and rebuilding its startup projections; nil in production.
+var beforeStartupRebuild func(*Service)
+
 func (s *Service) Snapshot() Summary {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -268,10 +272,20 @@ func (s *Service) Run(ctx context.Context) error {
 					s.summary = savedSummary
 					v.Source = savedSummary
 					s.holdProjectionLocked(v)
+					if s.needsStartupRebuild {
+						// A legacy cache lacks startup projections: report the
+						// rebuild as an import before releasing the lock so no
+						// observer sees a "complete" summary with empty views.
+						s.summary.ImportInProgress = true
+						s.summary.SourceState = "replaying"
+					}
 				}
 				s.mu.Unlock()
 			}
 			if e == nil && s.needsStartupRebuild {
+				if beforeStartupRebuild != nil {
+					beforeStartupRebuild(s)
+				}
 				e = s.rebuildDerived(ctx)
 			}
 			err = e

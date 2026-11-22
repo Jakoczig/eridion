@@ -366,3 +366,52 @@ func TestG2MCMalformedSnapshotDoesNotBecomeKnown(t *testing.T) {
 		})
 	}
 }
+
+// The legacy-cache upgrade flake: between restoring a cache that needs a
+// startup rebuild and the rebuild itself, the service must not report a
+// completed import, or observers (UI, tests) read empty startup projections.
+func TestG2MCLegacyCacheRebuildNeverLooksComplete(t *testing.T) {
+	dir, profile := t.TempDir(), t.TempDir()
+	raw, err := os.ReadFile("../../../tests/testdata/g2mc/startup.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(dir, "Journal.20261119.01.log"), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	s, stop := durableService(t, profile, dir)
+	waitState(t, s, func(v Summary) bool { return !v.ImportInProgress && v.EventsRead == 10 })
+	db, _ := s.History()
+	s.mu.Lock()
+	old, err := s.cacheLocked()
+	s.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c reducerCache
+	if err = gob.NewDecoder(bytes.NewReader(old)).Decode(&c); err != nil {
+		t.Fatal(err)
+	}
+	c.Parity, c.Activity, c.StartupVersion = paritystate.NewModel(), activitystate.NewModel(), 0
+	var encoded bytes.Buffer
+	if err = gob.NewEncoder(&encoded).Encode(c); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.SaveCache(context.Background(), encoded.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	stop()
+	var observed []Summary
+	beforeStartupRebuild = func(s *Service) { observed = append(observed, s.Snapshot()) }
+	defer func() { beforeStartupRebuild = nil }()
+	s, stop = durableService(t, profile, dir)
+	defer stop()
+	waitState(t, s, func(v Summary) bool { return !v.ImportInProgress && v.EventsRead == 10 })
+	requireStartup(t, s)
+	if len(observed) != 1 {
+		t.Fatalf("rebuild hook ran %d times", len(observed))
+	}
+	if !observed[0].ImportInProgress {
+		t.Fatalf("legacy cache reported a completed import before its rebuild: %+v", observed[0])
+	}
+}
