@@ -9,14 +9,21 @@ import (
 )
 
 type Controller struct {
-	mu           sync.Mutex
-	handle       func(string) error
-	clipboard    func(string) bool
-	saveCSV      func(string, string) error
-	chooseAvatar func() ([]byte, error)
-	quitOnClose  atomic.Bool
+	windowProfile string
+	mu            sync.Mutex
+	handle        func(string) error
+	clipboard     func(string) bool
+	saveCSV       func(string, string) error
+	chooseAvatar  func() ([]byte, error)
+	quitOnClose   atomic.Bool
 }
 
+// SetWindowProfile is supplied by the native entry point, never browser RPC.
+func (c *Controller) SetWindowProfile(profile string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.windowProfile = profile
+}
 func (c *Controller) BindAvatar(f func() ([]byte, error)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

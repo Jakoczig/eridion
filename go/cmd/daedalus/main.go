@@ -89,6 +89,7 @@ func run(ctx context.Context, args []string, assets fs.FS, launch launcher, out 
 		}
 	}
 	controller := &desktop.Controller{}
+	controller.SetWindowProfile(*dataDir)
 	if modes == 0 || *nativeCompanionSmoke {
 		ctx = desktop.WithController(ctx, controller)
 	}
