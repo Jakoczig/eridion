@@ -413,7 +413,7 @@ func (m *Manager) Observe(e journal.Event, phase journal.Phase) {
 		m.sourceFile = e.Position.FileID
 		m.sourceSequence = e.Position.Sequence
 	}
-	m.stationEventLocked(e, phase)
+	m.stationEventLocked(e, phase, v)
 	if e.Type == "Fileheader" {
 		m.identity = ""
 		m.fid = ""
