@@ -1,36 +1,35 @@
-# README
+# Elite Dangerous wiki snapshot
 
-This includes material from the Elite Dangerous wiki at Fandom and is licensed under the Creative Commons Attribution-Share Alike License.
+This directory preserves a **27 May 2022** snapshot of material from the [Elite Dangerous wiki at Fandom](https://elite-dangerous.fandom.com). It is historical reference data, not a current game-data feed.
 
-* https://elite-dangerous.fandom.com
-* https://www.fandom.com/licensing
+The inherited notice identifies the material as **Creative Commons Attribution–ShareAlike** and links to [Fandom's licensing information](https://www.fandom.com/licensing). Preserve source attribution, applicable notices, and backlinks when using derived text. This note does not infer a license version that is absent from the local evidence.
 
-The purpose of exporting this data is to be able to provide additional information inside DAEDALUS Terminal, such as context sensitive information about modules, equipment, items, factions, etc and to provide a glossary/codex.
+## Why the snapshot is kept
 
-This will be done with appropriate licensing information and credits / backlinks.
+The snapshot is still a build input. [scripts/build/build-data.js](../../../scripts/build/build-data.js) reads:
 
-## Exporting Data via API
+```text
+elite_dangerousfandomcom-20220527-wikidump/
+  elite_dangerousfandomcom-20220527-current.xml
+```
 
-This can be exported using the API via REST queries:
+Its `codexArticles()` transformation parses the snapshot and uses article quotations to enrich commodity reference data. The active outputs are `commodity-descriptions.json` and `all-commodites.json` (the retained filename spelling); full codex-page and index export is currently disabled. Removing the XML because it is old would break that regeneration path. Existing source data and generated descriptions must not be treated as authoritative for new ships, modules, game mechanics, or current community events.
 
-https://elite-dangerous.fandom.com/api.php?action=query&list=allpages&aplimit=500&export=true&format=json
+## Preserved provenance
 
-## Data Dump via API
+| File | Purpose |
+| --- | --- |
+| The dated XML dump | Source article content consumed by the data builder. |
+| The dated titles list | Historical page inventory from the export. |
+| `config.txt` in the dump directory | Historical exporter configuration and resume metadata. Treat it as data; it is not ERIDION application configuration. |
+| `dumpgenerator.py` | The inherited WikiTeam exporter, with its original copyright and GPL notice. It documents how the snapshot was obtained. |
 
-The Wiki Team have writen a python2 script to help with exporting data in bulk:
+The exporter and the wiki content have separate licenses. Keep the WikiTeam notice in the exporter and the content attribution above.
 
-https://github.com/WikiTeam/wikiteam/wiki/Tutorial
+## Maintenance policy
 
-To use this script you will need to have Python v2 installed and install dependancies:
+The previous README's Python 2 bootstrap and `sudo` installation commands are retired as present-day setup instructions. The exporter is retained for historical provenance, not added to the native build or runtime.
 
-    curl https://bootstrap.pypa.io/pip/2.7/get-pip.py --output get-pip.py
-    sudo python2 get-pip.py
-    pip2 install kitchen requests mwclient lxml
+A future refresh must identify the actual source, applicable terms, export date, and transformation; review the resulting content and attribution before replacing the snapshot. Use a maintained export mechanism chosen for that work. Do not silently fetch new wiki content during ordinary builds.
 
-Note: Some of the documentation on the offical site is wrong, this is an example of the correct way to use this script:
-
-    python2 dumpgenerator.py --api=https://elite-dangerous.fandom.com/api.php --xml --curonly --images --resume --delay=1
-
-This will generate an XML dump of the site.
-
-The text on this wiki is released under Creative Commons Attribution-Share Alike License.
+Changes to the derived data should be reviewed alongside the parser and its consumers. Native ERIDION's provider/source policy remains separate from this dated offline reference corpus.

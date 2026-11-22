@@ -14,8 +14,8 @@ ERIDION continues the work of [DAEDALUS Terminal](https://github.com/Varzeki/dae
 
 | Track | Where to find it | Status |
 | --- | --- | --- |
-| Native ERIDION | [`go/g3f-galaxy-viewport-slices`][native-branch] and [PR #28][preview-pr] | Current preview described by this README, as of 22 November 2026. |
-| Legacy application | [`main`](https://github.com/Jakoczig/eridion/tree/main) | Contains the inherited application; the native development stack has not been merged here. |
+| Native ERIDION | [go/g3f-galaxy-viewport-slices][native-branch] and [PR #28][preview-pr] | Current preview described by this README, as of 22 November 2026. |
+| Legacy application | [main](https://github.com/Jakoczig/eridion/tree/main) | Contains the inherited application; the native development stack has not been merged here. |
 | Planned corrections | [Development priorities below](#development-priorities) | Agreed direction for subsequent work; these are not claims of completed functionality. |
 
 The native preview has Windows and Linux build and automated verification workflows. Real-game behavior, physical paired devices, and live provider coverage still need acceptance for each relevant change. Preview artifacts are unsigned experimental executables, not a stable ERIDION installer.
@@ -49,54 +49,9 @@ The native application keeps its own profile and history. Preserve an existing i
 
 ## Build the native preview
 
-These instructions select the native development branch explicitly. A default clone of `main` still contains the legacy application.
+Use the [ERIDION build guide](BUILD.md) for native Windows/Linux prerequisites, source commands, runtime setup, and troubleshooting. It explicitly selects the native development branch and keeps legacy development/packaging commands in their own section.
 
-### Prerequisites
-
-- Git.
-- Node.js and npm to build the interface. The native CI currently uses **Node.js 24.22.1**.
-- **Go 1.26.10**, matching the toolchain in [`go/go.mod`][go-module].
-- A C compiler with CGO enabled for SQLite. Windows builds need a compatible GCC/MinGW toolchain on `PATH`.
-- The runtime requirements above. Linux builds also need development packages; the Ubuntu 24.04 CI installs `build-essential`, `pkg-config`, `libgtk-4-dev`, and `libwebkitgtk-6.0-dev`.
-
-The native build embeds the React assets and uses Wails v3. It does not require a separately running Node service or an EDMC/Python runtime.
-
-### Fetch the source and build the interface
-
-```sh
-git clone --branch go/g3f-galaxy-viewport-slices --single-branch https://github.com/Jakoczig/eridion.git
-cd eridion
-npm ci
-npm run build:go-assets
-cd go
-go mod download
-go mod verify
-```
-
-### Build and run on Windows — PowerShell
-
-From the `go` directory:
-
-```powershell
-$env:CGO_ENABLED = "1"
-go build -o bin/eridion.exe ./cmd/daedalus
-.\bin\eridion.exe
-```
-
-### Build and run on Linux
-
-From the `go` directory:
-
-```sh
-CGO_ENABLED=1 go build -o bin/eridion ./cmd/daedalus
-./bin/eridion
-```
-
-If Ubuntu 24.04 reports a WebKit `bwrap` or user-namespace startup error, follow the [Linux startup note][linux-startup] for an AppArmor profile scoped to the built executable. Keep WebKit's sandbox enabled.
-
-The source entry point is still named `cmd/daedalus` for compatibility; the application is ERIDION. If journal discovery needs an override, pass `--journal-dir "/path/to/Elite Dangerous journals"`. Use `--data-dir "/path/to/separate-profile"` when an isolated development profile is needed.
-
-The [native desktop workflow][native-workflow] is the executable reference for build dependencies and verification. [BUILD.md](BUILD.md) primarily documents the legacy application: `npm start`, `npm run dev`, `npm run build`, and `npm run build:standalone` use that older path.
+The native application embeds its React interface and runs a shared Go service. Node.js is needed to build the interface, while the installed application uses the operating system's WebView. The source entry point remains named `go/cmd/daedalus` for compatibility.
 
 ## Data and external services
 
@@ -134,13 +89,15 @@ These requirements guide the next corrections and feature work. They are deliber
 
 ## Development and documentation
 
+Start with [BUILD.md](BUILD.md) and [CONTRIBUTING.md](CONTRIBUTING.md). The [native mining roadmap](docs/roadmap/mining.md) consolidates useful inherited mining and layout requirements. The [inherited-file audit](docs/maintenance/inherited-files-audit.md) records the cleanup decisions and retained provenance.
+
 | Location on the native branch | Purpose |
 | --- | --- |
-| [`go/`][go-source] | Native desktop host, shared service, journal processing, history, providers, and domain logic. |
-| [`src/client/`][client-source] | Shared React interface and native-service presentation. |
-| [`src/service/`][legacy-source] | Legacy Node service retained during the transition. |
-| [`docs/handoffs/`][handoffs] and [`docs/testing/`][testing] | Milestone scope, limitations, verification notes, and acceptance checklists. |
-| [`docs/licenses/g2k/`][field-credits] | Pinned native field-tool sources and license notices. |
+| [go/][go-source] | Native desktop host, shared service, journal processing, history, providers, and domain logic. |
+| [src/client/][client-source] | Shared React interface and native-service presentation. |
+| [src/service/][legacy-source] | Legacy Node service retained during the transition. |
+| [docs/handoffs/][handoffs] and [docs/testing/][testing] | Milestone scope, limitations, verification notes, and acceptance checklists. |
+| [docs/licenses/g2k/][field-credits] | Pinned native field-tool sources and license notices. |
 
 For changes to the native branch, relevant checks include the following, with the build prerequisites installed:
 
@@ -185,9 +142,6 @@ Elite Dangerous is copyright Frontier Developments plc. ERIDION is an independen
 [preview-pr]: https://github.com/Jakoczig/eridion/pull/28
 [preview-setup]: https://github.com/Jakoczig/eridion/blob/go/g3f-galaxy-viewport-slices/docs/testing/g3e-map-refinement-preview.md
 [pairing-guide]: https://github.com/Jakoczig/eridion/blob/go/g3f-galaxy-viewport-slices/docs/testing/g1b-secure-remote-displays.md
-[linux-startup]: https://github.com/Jakoczig/eridion/blob/go/g3f-galaxy-viewport-slices/docs/testing/g1a-windows-linux-smoke.md#build-prerequisites
-[go-module]: https://github.com/Jakoczig/eridion/blob/go/g3f-galaxy-viewport-slices/go/go.mod
-[native-workflow]: https://github.com/Jakoczig/eridion/blob/go/g3f-galaxy-viewport-slices/.github/workflows/go-desktop.yml
 [provider-capabilities]: https://github.com/Jakoczig/eridion/blob/go/g3f-galaxy-viewport-slices/go/internal/providers/types.go
 [frontier-contract]: https://github.com/Jakoczig/eridion/blob/go/g3f-galaxy-viewport-slices/docs/protocols/eridion-frontier-website-return.md
 [history-handoff]: https://github.com/Jakoczig/eridion/blob/go/g3f-galaxy-viewport-slices/docs/handoffs/g2j-persistent-history-integrations.md

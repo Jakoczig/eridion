@@ -1,125 +1,152 @@
-# Developer Documentation
+# Building ERIDION
 
-_This documentation is intended for developers who want to build from source._
+ERIDION has two source paths while the native rewrite is in progress. Choose the path deliberately.
 
-DAEDALUS is a Windows (Win32) application built primarily in JavaScript, using Node.js + WebSockets and Go with a fork of custom [Edge/WebView2 abstraction in C/C++](https://github.com/iaincollins/webview).
+| Application | Source | Build entry point |
+| --- | --- | --- |
+| Native ERIDION preview | [Current native branch][native-branch] | React asset export plus the Go application under `go/`. |
+| Inherited legacy application | `main`, and retained legacy folders on native branches | Root npm development, installer, and standalone-service scripts. |
 
-The self-contained installer is around 20 MB and has no dependancies. If you are running an older but supported release of Microsoft Windows, any required Microsoft provided DLLs that are not found will be automatically loaded by the bundled Microsoft installer (e.g. the Microsoft Edge common runtime used to render the user interface).
+The native branch described here is G3F, reviewed at [864c724][native-source] on 22 November 2026. The [README](README.md) identifies preview availability and known limitations. [CONTRIBUTING.md](CONTRIBUTING.md) explains how to choose a branch and verification scope.
 
-There are other (less complicated) ways to build a cross platform app using a technology like WebView (e.g. [Electron](https://www.electronjs.org/), [Photino](https://www.tryphotino.io/)) but the stack used was chosen to meet specific criteria, including the ability to leverage both native Windows features and to re-use existing isomorphic code, in an optimally sized and fully self-contained installer.
-
-It is possible to build the entire project (or any of the individual components) in a single build step, but due to the nature of Microsoft Windows several pre-requsites must be configured to set up a build environment for the first time. These are documented below.
-
-## Getting Started
-
-The codebase is split up into three parts:
-
-* `src/app` — "DAEDALUS Terminal.exe", a Win32 application written in Go
-* `src/service` — "DAEDALUS Service.exe", a Win32 application written in Node.js
-* `src/client` — A web based client interface, developed in Next.js/React
-
-The web client is bundled into the service, and you can use web browser to connect directly to the service instead of (or as well as ) using "DAEDALUS Terminal.exe" to launch a native window to display the UI.
-
-The service uses sockets to interact with clients on the local network and is able to as many terminals on as many devices as you may wish to access it from.
-
-"DAEDALUS Terminal.exe" is still required for platform specific functionality, such as installing updates, creating always-on-top (pinned) windows and reliable save game detection as these rely on OS calls which are handled by the application.
-
-### DAEDALUS Terminal.exe
-
-"DAEDALUS Terminal.exe" serves as both a launcher and a shell to render the graphical interface. It creates new terminal windows by spawing itself with the `--terminal` and `--port` flags). All terminal processes exit when the launcher terminates. 
-
-"DAEDALUS Terminal.exe" uses [a fork of a webview wrapper for Go/C++](https://github.com/iaincollins/webview) which uses the Microsoft Edge/Chromium engine included in Windows to render the interface. This library has been manually bundled with this project in `resources/dll`, along with a suitable loader from Microsoft. This project does not install it's own webview rendering engine and uses the one built into Windows.
-
-There can be multiple instances of "DAEDALUS Terminal.exe" running. DAEDALUS Terminal is designed to allow you to pin multiple windows to a single screen, or run multiple windows across different screens. The first instance will be designated as the "launcher" window. The launcher will have a different interface to the terminal windows and is responsible for starting and stopping the background service, for checking for updates and for shutting down terminal windows when the main window (the launcher) is closed.
-
-### DAEDALUS Service.exe
-
-"DAEDALUS Service.exe" is a self contained service, websocket server and a static webserver. The service interfaces with the game, broadcasts events to terminals (using a two way socket based API) and allows the graphical interface to be accessed remotely from computers, tablets and phones. DAEDALUS Service is invoked automatically by "DAEDALUS Terminal.exe" and is stopped when "DAEDALUS Terminal.exe" is quit.
-
-The user interface is written in Next.js/React and is statically exported and the assets bundled inside "DAEDALUS Service.exe", making it an entirely self contained service that can be used without "DAEDALUS Terminal.exe", by connecting to the service via a web browser - an approach which makes the codebase highly portable, as it leaves "DAEDALUS Terminal.exe" to handle interactions with native OS APIs for things like window management and software updates.
-
-All terminals (and any web clients) connect to the same single instance of service which receives and broadcasts messages to all of them using a websocket interface. There should only ever one instance of "DAEDALUS Service.exe" running at a time. It defaults to runnning on port 3300, although this is configurable at run time using command line flags.
-
-## Building
+## Native Windows and Linux preview
 
 ### Requirements
 
-To build the entire application you need to be running Microsoft Windows and have the following dependencies installed:
+- Git.
+- Node.js and npm for building the interface. Native CI pins **Node.js 24.22.1**.
+- **Go 1.26.10**, matching the native module's pinned toolchain.
+- A C compiler with CGO enabled for SQLite; Windows requires a compatible GCC/MinGW toolchain on `PATH`.
+- Windows 10/11 x64 with Microsoft Edge WebView2 Runtime, or a Linux graphical session with GTK 4, WebKitGTK 6, and session D-Bus.
+- Linux stored provider credentials additionally require an unlocked Secret Service and `secret-tool` (`libsecret-tools` on Ubuntu).
 
-* [Go Lang](https://golang.org/) to build the Win32 app (DAEDALUS Terminal)
-* [Node.js](https://nodejs.org/en/download/)  to build the socket service (DAEDALUS Service) and React UI
-* [NSIS](https://nsis.sourceforge.io/) to build the Windows installer (can install with `winget install NSIS.NSIS`)
+For Linux compilation, the Ubuntu 24.04 CI uses `build-essential`, `pkg-config`, `libgtk-4-dev`, and `libwebkitgtk-6.0-dev`. Headless native-window checks additionally use `xvfb` and `dbus-x11`; these are test dependencies.
 
-You may also need the following dependancies, depending on the build steps you wish to run (e.g. if you are building assets):
+Wails v3 is resolved through Go modules. A separate Wails CLI, running Node service, Python runtime, and NSIS are not needed for this native executable build.
 
-* [Python 3](https://www.python.org/downloads/) for building assets and binaries
-* [Visual Studio](https://visualstudio.microsoft.com/downloads/) or MS Build Tools with "Desktop development with C++" for working with Windows APIs
+### Fetch source and prepare embedded assets
 
-Currently Elite Dangerous is only offically supported on Windows however you can build and run the core cross platform on Windows, Mac and Linux. DAEDALUS Terminal does not currently support integration with console platforms (XBox and PlayStation) as they use a different implementation of the API. As the console version of Elite Dangerous is now in maintenance mode (as of March 2022) plans to support the console releases have been deprioritized.
+```sh
+git clone --branch go/g3f-galaxy-viewport-slices --single-branch https://github.com/Jakoczig/eridion.git
+cd eridion
+npm ci
+npm run build:go-assets
+cd go
+go mod download
+go mod verify
+```
 
-### Building on Windows
+Rebuild the embedded assets after changing the React interface. These commands require the native branch; `main` does not yet contain its Go tree.
 
-With the required build tools and dependencies installed (`npm install`) you can build the application in a single step:
+### Windows — PowerShell
 
-* `npm run build`
+From `go/`:
 
-This will output a standalone installer "DAEDALUS Setup.exe" in `dist/` directory.
+```powershell
+$env:CGO_ENABLED = "1"
+go build -o bin/eridion.exe ./cmd/daedalus
+.\bin\eridion.exe
+```
 
-Intermediate builds can be found in `build/` directory. See `build/bin` for the final binaries, these can be run in place without having to run the installer. If you run "DAEDALUS Terminal.exe" it will start the "DAEDALUS Service.exe" automatically in the background (and shut it down again when the main Terminal window is closed).
+### Linux
 
-You can also run each build step independently:
+From `go/`:
 
-* `npm run build:app` builds only the GUI app (DAEDALUS Terminal.exe)
-* `npm run build:service` builds only the service (DAEDALUS Service.exe)
-* `npm run build:client` builds only the web interface; required to build the service as is an embedded resource
-* `npm run build:package` builds only the Windows installer (DAEDALUS Setup.exe)
-* `npm run build:assets` builds assets (icons, fonts, etc) - e.g. used to update the icon font
-* `npm run build:clean` resets the build environment
+```sh
+CGO_ENABLED=1 go build -o bin/eridion ./cmd/daedalus
+./bin/eridion
+```
 
-You can also generate fast, unoptimized builds to test executables without building an installable package:
+The source directory `cmd/daedalus` is a retained compatibility name. These local commands choose an ERIDION executable name. The current CI/preview packager instead uses an intermediate `go/bin/daedalus[.exe]` and packages it as `eridion[.exe]`; consult the workflow before packaging.
 
-* `npm run build:debug` build DAEDALUS Terminal.exe and DAEDALUS Service.exe with debug output and no optimization
-* `npm run build:debug:app` build DAEDALUS Terminal.exe with debug output and no optimization
-* `npm run build:debug:service` build DAEDALUS Service.exe with debug output and no optimization
+Use `--journal-dir "/path/to/journals"` to override discovery and `--data-dir "/path/to/separate-profile"` for an isolated development profile. Native profile/journal configuration does not use the legacy `.env-example`.
 
-A debug build displays debug information on the console and builds very quickly (1-2 seconds). The functionality should be the same, however builds may be slower and binary sizes are significantly larger.
+If Ubuntu 24.04 reports a WebKit `bwrap` or user-namespace startup error, follow the [Linux startup note][linux-startup] for an executable-specific AppArmor configuration. Keep WebKit's sandbox enabled.
 
-Note:
+### Verification and previews
 
-"DAEDALUS Terminal.exe" depends on "DAEDALUS Service.exe" being in the same directory to run, or it will exit on startup with a message indicating unable to start the DAEDALUS Terminal Service, so you must build the service at least once before you can launch "DAEDALUS Terminal.exe" directly.
+The [native desktop workflow][native-workflow] records the actual build, lint, Go, race, asset, browser, and smoke checks. The [current preview PR][preview-pr] identifies workflow runs and available artifacts. Archive milestone labels alone do not establish the compiled revision.
 
-### One-step cross platform build (Win/Mac/Linux)
+For a local startup check, `eridion --smoke-test` runs the isolated offline service check; `eridion --desktop-smoke-test` opens a native window and checks React/RPC startup. Invoke the executable using its path as above. These checks do not establish real-game or paired-device acceptance.
 
-DAEDALUS Terminal can also be run as a native, standalone application (without an installer) on Windows, Mac and Linux. Elite Dangerous is not offically supported on Linux or Mac and neither is DAEDALUS Terminal. I strongly recommend running the Windows version of DAEDALUS Terminal under the same emulation/compatibility layer as you are using for Elite Dangerous, but this option is provided for completeness.
+## Legacy application — retained maintenance path
 
-The only requirement for building the core service is [Node.js](https://nodejs.org/en/download/).
+The inherited application has a React/Next.js client, a Node service, and a Windows Go wrapper using the vendored `go-webview2` dependency. These folders remain useful during migration. The root commands below do not build native ERIDION.
 
-You can easily build a native standalone binary for Windows, Mac and Linux with:
+### Run the legacy development service
 
-* `npm install`
-* `npm run build:standalone`
+Use Node.js 24 and npm, matching the legacy packaging target and current workflow family. From a checkout containing the legacy source:
 
-This will build cross platform binaries for Windows (x86), Mac (x64) and Linux (x64) in the `dist/` directory.
+```sh
+npm ci
+```
 
-For usage information run the binary with the `--help` flag.
+Start with automatic journal discovery. The legacy service defaults to the current user's `Saved Games/Frontier Developments/Elite Dangerous` directory.
 
-Notes:
+```sh
+npm run dev
+```
 
-* The standalone binary does not feature auto-update notifications.
-* The standalone binary does not have a native UI, you must connect via a browser.
-* Features that depend on native UI (e.g. always on top, borderless) are not supported.
-* If you wish to build for other architure (e.g. arm64) edit the target value for your platform in `scripts\build-standalone.js`.
-* On Linux, due to what seems to bug in the complier not bundling resources correctly, the binary needs to be executed from the dist directory (i.e. `dist/icaurs-terminal-service-linux`) and it may not work correctly if it is moved to another location.
+For an explicit journal-directory override, use the CLI option. For example, in PowerShell:
 
-As the game itself is not supported by the developers on Mac or Linux I do not plan to aim for feature parity on these platforms.
+```powershell
+npm run dev -- --save-game-dir "C:\Users\YOUR_USER\Saved Games\Frontier Developments\Elite Dangerous"
+```
 
-## Development mode
+The option accepts the journal folder or a Saved Games base containing the expected Frontier subdirectory. Replace the example with the actual path.
 
-You can run DAEDALUS Terminal in development mode without building a native binary, all you need installed is Node.js and a web browser to access the client.
+Copy `.env-example` to `.env` only if legacy environment configuration is needed (`cp` in a POSIX shell or `Copy-Item` in PowerShell). Leave `LOG_DIR` unset for discovery. The inherited environment parser treats only `/`-prefixed paths as absolute; other values are relative to `src/service/`, so use `--save-game-dir` for Windows drive-letter paths.
 
-* `npm install`
-* `npm run dev`
+The legacy browser interface defaults to `http://localhost:3300`. `npm start` is an alias for this development path. The legacy WebView wrapper is Windows-specific; a browser service target does not establish native platform support.
 
-You can access the web client at http://localhost:3300
+### Windows installer build
 
-Note: You may also need to create a `.env` file with a `LOG_DIR` entry so it can find your game data, see `.env-example`.
+The legacy full build needs Windows, Node/npm, Go, NSIS, and the compiler/reference assemblies used by its Windows helper programs. In particular, [build-service.js](scripts/build/build-service.js) locates a .NET Framework C# compiler, `System.Runtime` facade, Windows Runtime assembly, and Windows SDK metadata for audio-meter and thumbnail helpers. Check the supported paths in that script when preparing the build machine.
+
+```sh
+npm ci
+npm run build
+```
+
+Outputs remain legacy-named:
+
+- `build/bin/DAEDALUS Terminal.exe` — Go wrapper.
+- `build/bin/DAEDALUS Service.exe` — packaged Node service.
+- `dist/DAEDALUS Setup.exe` — NSIS installer.
+
+The wrapper and service must be kept with their required companion files. The installer contains WebView2 bootstrap logic; the application is not dependency-free. Media helper availability depends on the supplied binaries, and binary/version verification is a separate packaging concern.
+
+| Command | Legacy purpose |
+| --- | --- |
+| `npm run build:client` | Export the React interface. |
+| `npm run build:app` | Build the Windows Go wrapper. |
+| `npm run build:service` | Package the Node service and Windows helpers. |
+| `npm run build:verify` | Run the legacy binary verification script. |
+| `npm run build:package` | Assemble the Windows installer. |
+| `npm run build:debug` | Build the client, wrapper, and service in debug mode. |
+| `npm run build:data` | Regenerate derived reference data, including the dated wiki snapshot. |
+| `npm run build:assets` | Rebuild assets and derived data. |
+| `npm run build:clean` | Remove generated build output. |
+
+The example environment defaults code signing off. Enable signing only with a certificate you control and the required signing tool configuration. The manually dispatched release workflow publishes a GitHub release; it is not a build-only check.
+
+### Legacy standalone service
+
+```sh
+npm ci
+npm run build:standalone
+```
+
+The current script targets Node 24 on Linux x64, macOS x64, and Windows x64. It writes `dist/daedalus-terminal-service-linux`, `-mac`, and `-windows`, plus the copied `game_voicelines` directory. These are browser-service packages, with no native window, installer, or native ERIDION feature guarantee.
+
+Review the scripts before invoking destructive clean/package steps: the standalone build recreates its `dist/` output directory.
+
+## Reference data and maintenance tools
+
+The [wiki snapshot note](resources/data/fandom/README.md) explains the retained data and attribution. [Maintenance tools](docs/maintenance/development-tools.md) documents the preserved SVG annotator and why historical probes were retired.
+
+[native-branch]: https://github.com/Jakoczig/eridion/tree/go/g3f-galaxy-viewport-slices
+[native-source]: https://github.com/Jakoczig/eridion/tree/864c724057a7fe28d9d42f5985fa5e1828d3b030
+[native-workflow]: https://github.com/Jakoczig/eridion/blob/864c724057a7fe28d9d42f5985fa5e1828d3b030/.github/workflows/go-desktop.yml
+[linux-startup]: https://github.com/Jakoczig/eridion/blob/864c724057a7fe28d9d42f5985fa5e1828d3b030/docs/testing/g1a-windows-linux-smoke.md#build-prerequisites
+[preview-pr]: https://github.com/Jakoczig/eridion/pull/28

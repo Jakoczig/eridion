@@ -1,5 +1,5 @@
 /**
- * annotate-svgs.mjs
+ * annotate-device-svgs.mjs
  *
  * Adds data-label / data-labels attributes directly to <rect> (label boxes)
  * and <path> (leader lines) elements in device SVGs. Both elements get the
@@ -7,9 +7,9 @@
  * them as a matched pair without relying on SVG tree structure.
  *
  * Usage:
- *   node _dev-scripts-backup/annotate-svgs.mjs
+ *   node scripts/annotate-device-svgs.mjs
  *
- * Run from the daedalus/ project root. Idempotent — clears existing
+ * Run from the repository root. The inherited implementation clears existing
  * data-label / data-labels attributes on each run before re-annotating.
  */
 
