@@ -48,13 +48,13 @@ async function main () {
       await waitFor(() => evaluate('document.querySelector(".go-galaxy-axes")?.textContent.includes("250 LY")'))
       const unchanged = await evaluate('Array.from(document.querySelectorAll(".go-galaxy-plane>svg")).map(e=>{const r=e.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}})')
       if (unchanged.some((r, i) => Object.keys(r).some(k => Math.abs(r[k] - layout.planes[i][k]) > 1))) throw Error('XYZ or mode changed panel rectangles')
-      const beforePositions = await evaluate('Array.from(document.querySelectorAll("[data-marker=destination]")).map(e=>e.dataset.position).join(";")')
+      const beforePositions = await evaluate('Array.from(document.querySelectorAll("[data-marker=destination][data-axes=xz]")).map(e=>e.dataset.position).join(";")')
       for (const axis of ['Y', 'Z']) { await evaluate(`document.querySelector('[aria-label="Increase ${axis} extent"]').click()`); await delay(250) }
       const resized = await evaluate('Array.from(document.querySelectorAll(".go-galaxy-plane>svg")).map(e=>{const r=e.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}})')
       if (resized.some((r, i) => Object.keys(r).some(k => Math.abs(r[k] - layout.planes[i][k]) > 1))) throw Error('YZ changed panel rectangles')
-      const afterPositions = await evaluate('Array.from(document.querySelectorAll("[data-marker=destination]")).map(e=>e.dataset.position).join(";")')
-      if (beforePositions === afterPositions) throw Error('Mapped coordinates did not change after XYZ')
-      report.layouts.at(-1).stableXYZ = true
+      const afterPositions = await evaluate('Array.from(document.querySelectorAll("[data-marker=destination][data-axes=xz]")).map(e=>e.dataset.position).join(";")')
+      if (beforePositions !== afterPositions) throw Error('XYZ slice edit unexpectedly moved the fixed X/Z camera')
+      report.layouts.at(-1).stableXYZ = true; report.layouts.at(-1).sliceEditingKeepsCamera = true
       await shot('local-adjusted-' + name)
       await click('Fit Route'); await waitFor(() => evaluate('document.querySelector(".go-galaxy-axes")?.textContent.includes("200 LY")'))
     }
