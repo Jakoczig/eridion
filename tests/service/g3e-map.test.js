@@ -76,3 +76,48 @@ test('selection clipping changes independently and out-of-volume markers stay sy
     assert.notEqual(/<clipPath[^>]*>(.*?)<\/clipPath>/.exec(before)[1], /<clipPath[^>]*>(.*?)<\/clipPath>/.exec(after)[1])
   } finally { h.unmount() }
 })
+
+test('G3F camera ignores slice thickness while fixed panels use their full SVG area', () => {
+  const h = harness('go-galaxy-projection', null, 'Projection')
+  try {
+    const selection = { x: [-254, 254], y: [-58.5, 58.5], z: [-254, 254] }
+    const camera = h.exports.mapCameraFrame(selection)
+    assert.deepEqual(camera.x, [-254, 254])
+    assert.deepEqual(camera.z, [-254, 254])
+    assert.deepEqual(camera.y, selection.y)
+    const thicker = h.exports.mapCameraFrame({ ...selection, y: [-300, 300] })
+    assert.deepEqual(thicker.x, camera.x)
+    assert.deepEqual(thicker.z, camera.z)
+    const uneven = h.exports.mapCameraFrame({ ...selection, x: [-600, 600] })
+    assert.equal(uneven.x[1] - uneven.x[0], uneven.z[1] - uneven.z[0])
+    Object.assign(h.props, { axes: 'xz', frame: camera, selectionFrame: selection, localGeometry: false, clipSelection: false })
+    assert.match(h.html(), /viewBox="0 0 100 100"/)
+    assert.doesNotMatch(h.html(), /<clipPath/)
+    h.props.axes = 'xy'
+    assert.match(h.html(), /viewBox="0 0 100 8"/)
+    h.props.axes = 'yz'
+    assert.match(h.html(), /viewBox="0 0 8 100"/)
+  } finally { h.unmount() }
+})
+
+test('G3F XYZ controls change the selected volume without changing the camera or moving markers', () => {
+  const h = harness('go-unified-galaxy', {})
+  try {
+    const selection = { x: [-254, 254], y: [-58.5, 58.5], z: [-254, 254] }
+    const first = h.exports.adjustSlice(selection, null, 'x', 1)
+    const camera = first.camera
+    assert.equal(first.selection.x[1] - first.selection.x[0], 608)
+    assert.deepEqual(camera.x, selection.x)
+    assert.deepEqual(camera.z, selection.z)
+    const second = h.exports.adjustSlice(first.selection, camera, 'y', 1)
+    const third = h.exports.adjustSlice(second.selection, camera, 'z', -1)
+    assert.strictEqual(second.camera, camera)
+    assert.strictEqual(third.camera, camera)
+    assert.deepEqual(third.camera.x, selection.x)
+    assert.deepEqual(third.camera.z, selection.z)
+    assert.notDeepEqual(third.selection, selection)
+    assert.equal(third.selection.y[1] - third.selection.y[0], 167)
+    // Local requests still use the exact selected bounds; no camera extent
+    // substitution is needed in the signed spatial backend.
+  } finally { h.unmount() }
+})
