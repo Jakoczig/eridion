@@ -268,3 +268,35 @@ func TestAuditMergeJournalRanks(t *testing.T) {
 		t.Fatalf("same-level progress lost: %+v", c)
 	}
 }
+
+// Audit F1: journal ranks known only to the live reducer are valid journal
+// evidence. They beat the equal third-party tier (Inara) and expired or
+// otherwise ineligible Frontier values; only eligible Frontier keeps its level.
+// The replaced value stays visible as a labelled alternative.
+func TestAuditMergeJournalRanksFollowsAuthority(t *testing.T) {
+	three, twelve := "3", "12"
+	journal := []JournalRank{{Category: "Combat", Rank: &three, Progress: &twelve}}
+	for name, resolved := range map[string]ResolvedRank{
+		"inara":            {Category: "combat", Rank: "5", Source: "inara", Authority: "third-party"},
+		"expired frontier": {Category: "combat", Rank: "8", Source: "frontier", Authority: "frontier", Stale: true},
+	} {
+		c := rankByCategory(MergeJournalRanks([]ResolvedRank{resolved}, journal), "combat")
+		if c == nil || c.Rank != "3" || c.Source != "journal" || c.Authority != "journal" || c.Stale || c.Progress == nil || *c.Progress != "12" {
+			t.Fatalf("%s kept over valid journal evidence: %+v", name, c)
+		}
+		if len(c.Alternatives) != 1 || c.Alternatives[0].Source != resolved.Source || c.Alternatives[0].Rank != resolved.Rank {
+			t.Fatalf("%s provenance not retained: %+v", name, c.Alternatives)
+		}
+	}
+	// An older witnessed journal level in provenance yields to the live
+	// reducer, which already applies within-source chronology.
+	older := []ResolvedRank{{Category: "combat", Rank: "2", Source: "journal", Authority: "journal", ObservedAt: "2026-01-01T00:00:00Z"}}
+	if c := rankByCategory(MergeJournalRanks(older, journal), "combat"); c.Rank != "3" || c.Source != "journal" {
+		t.Fatalf("live journal level lost to older provenance: %+v", c)
+	}
+	// Eligible Frontier keeps precedence.
+	fresh := []ResolvedRank{{Category: "combat", Rank: "8", Source: "frontier", Authority: "frontier"}}
+	if c := rankByCategory(MergeJournalRanks(fresh, journal), "combat"); c.Rank != "8" || c.Source != "frontier" || c.Progress != nil {
+		t.Fatalf("fresh Frontier replaced: %+v", c)
+	}
+}

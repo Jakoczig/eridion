@@ -135,6 +135,19 @@ type ResolvedRank struct {
 	Stale          bool    `json:"stale"`
 	Progress       *string `json:"progress"`
 	ProgressSource string  `json:"progressSource,omitempty"`
+	// Alternatives keeps lower-authority levels that were replaced, so
+	// provenance stays visible (for example an Inara or expired Frontier
+	// level superseded by valid journal evidence).
+	Alternatives []RankAlternative `json:"alternatives,omitempty"`
+}
+
+// RankAlternative is a superseded rank level with its source labels.
+type RankAlternative struct {
+	Rank      string `json:"rank"`
+	Source    string `json:"source"`
+	Authority string `json:"authority"`
+	FetchedAt string `json:"fetchedAt,omitempty"`
+	Stale     bool   `json:"stale"`
 }
 
 var rankCategories = []string{"combat", "trade", "explore", "cqc", "empire", "federation", "soldier", "exobiologist", "power", "builder", "learner"}
@@ -288,11 +301,15 @@ type JournalRank struct {
 	Rank, Progress *string
 }
 
-// MergeJournalRanks adds journal-tier evidence known only to the live reducer
-// (for example startup Rank/Progress written before LoadGame, which commander
-// provenance cannot attribute). Categories already resolved keep their
-// source; journal progress attaches only when the journal level equals the
-// effective level.
+// MergeJournalRanks applies the D0 order to journal-tier evidence known only
+// to the live reducer. Real journals write Rank/Progress before LoadGame, so
+// those levels never reach commander provenance; the reducer has already
+// attributed them to the commander and applied within-source chronology. A
+// valid journal level therefore replaces a third-party level, an expired or
+// otherwise ineligible Frontier level and an older journal level from
+// provenance. Only an eligible (fresh, validated) Frontier level keeps
+// precedence. Replaced levels stay as labelled alternatives, and journal
+// progress attaches only to the same level.
 func MergeJournalRanks(resolved []ResolvedRank, journal []JournalRank) []ResolvedRank {
 	out := append([]ResolvedRank{}, resolved...)
 	for _, j := range journal {
@@ -300,24 +317,41 @@ func MergeJournalRanks(resolved []ResolvedRank, journal []JournalRank) []Resolve
 		if category == "" || j.Rank == nil || *j.Rank == "" {
 			continue
 		}
+		live := ResolvedRank{Category: category, Rank: *j.Rank, Source: "journal", Authority: "journal"}
+		if j.Progress != nil {
+			progress := *j.Progress
+			live.Progress, live.ProgressSource = &progress, "journal"
+		}
 		found := false
 		for i := range out {
 			if out[i].Category != category {
 				continue
 			}
 			found = true
-			if out[i].Progress == nil && j.Progress != nil && out[i].Rank == *j.Rank {
-				progress := *j.Progress
-				out[i].Progress, out[i].ProgressSource = &progress, "journal"
+			current := out[i]
+			if current.Source == "frontier" && !current.Stale {
+				// Eligible Frontier wins; journal progress only for the same level.
+				if current.Progress == nil && live.Progress != nil && current.Rank == live.Rank {
+					out[i].Progress, out[i].ProgressSource = live.Progress, "journal"
+				}
+				continue
 			}
+			if current.Source == "journal" {
+				// Same source: keep provenance labels when the level agrees.
+				if current.Rank == live.Rank {
+					if live.Progress != nil {
+						out[i].Progress, out[i].ProgressSource = live.Progress, "journal"
+					}
+					out[i].Stale = false
+					continue
+				}
+				live.ObservedAt = ""
+			}
+			live.Alternatives = append(append([]RankAlternative{}, current.Alternatives...), RankAlternative{Rank: current.Rank, Source: current.Source, Authority: current.Authority, FetchedAt: current.FetchedAt, Stale: current.Stale})
+			out[i] = live
 		}
 		if !found {
-			r := ResolvedRank{Category: category, Rank: *j.Rank, Source: "journal", Authority: "journal"}
-			if j.Progress != nil {
-				progress := *j.Progress
-				r.Progress, r.ProgressSource = &progress, "journal"
-			}
-			out = append(out, r)
+			out = append(out, live)
 		}
 	}
 	index := map[string]int{}
