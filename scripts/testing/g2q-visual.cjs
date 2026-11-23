@@ -21,7 +21,7 @@ async function main () {
     }
   })
   await c.call('Network.enable'); await c.call('Fetch.enable', { patterns: [{ urlPattern: '*' }] })
-  const rpc = (name, message = {}) => evaluate(`new Promise((resolve,reject)=>{const w=new WebSocket(location.origin.replace('http:','ws:'));const timer=setTimeout(()=>{w.close();reject(Error('fixture RPC timeout'))},30000);w.onopen=()=>w.send(JSON.stringify({requestId:'g2q',name:${JSON.stringify(name)},message:${JSON.stringify(message)}}));w.onmessage=e=>{const r=JSON.parse(e.data);if(r.requestId==='g2q'){clearTimeout(timer);w.close();r.error?reject(Error(r.error)):resolve(r.message)}}})`)
+  const rpc = (name, message = {}) => evaluate(`new Promise((resolve,reject)=>{const w=new WebSocket(location.origin.replace('http:','ws:')+'/?scope=launcher');const timer=setTimeout(()=>{w.close();reject(Error('fixture RPC timeout'))},30000);w.onopen=()=>w.send(JSON.stringify({requestId:'g2q',name:${JSON.stringify(name)},message:${JSON.stringify(message)}}));w.onmessage=e=>{const r=JSON.parse(e.data);if(r.requestId==='g2q'){clearTimeout(timer);w.close();r.error?reject(Error(r.error)):resolve(r.message)}}})`)
   const shot = async name => { const r = await c.call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }); await fs.writeFile(path.join(output, name + '.png'), Buffer.from(r.data, 'base64')) }
   try {
     host = await fixture('G2E', '', path.join(root, 'tests/testdata/g2g')); origin = host.url

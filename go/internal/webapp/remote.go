@@ -219,7 +219,7 @@ func (m *remoteManager) statusLocked() map[string]any {
 	return map[string]any{"enabled": m.http != nil && !m.fault, "recoveryRequired": m.fault, "url": m.url, "address": m.state.Address, "addresses": addresses, "port": m.state.Port, "devices": devices, "ca": string(m.bundle.CAPEM), "fingerprint": m.bundle.Fingerprint, "notice": m.notice}
 }
 func (s *Server) ownerRemote(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" || !s.sameOrigin(r) || !s.sessions.valid(s.sessions.token(r)) || s.remote == nil {
+	if r.Method != "POST" || !s.sameOrigin(r) || !s.sessions.valid(s.sessions.token(r)) || !launcherHTTP(r.Header.Get("X-Eridion-Scope")) || s.remote == nil {
 		http.Error(w, "Forbidden", 403)
 		return
 	}
@@ -420,7 +420,7 @@ func (m *remoteManager) serve(epoch uint64, w http.ResponseWriter, r *http.Reque
 			http.Error(w, "Forbidden", 403)
 			return
 		}
-		m.server.serveSocket(w, r, socketPrincipal{role: "viewer", url: origin, remote: m, epoch: epoch, deviceID: d.ID, token: cookie.Value, valid: func() bool {
+		m.server.serveSocket(w, r, socketPrincipal{role: "viewer", scope: scopeViewer, url: origin, remote: m, epoch: epoch, deviceID: d.ID, token: cookie.Value, valid: func() bool {
 			m.mu.Lock()
 			defer m.mu.Unlock()
 			_, ok := m.findLocked(cookie.Value)

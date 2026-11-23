@@ -26,14 +26,21 @@ func (s *Server) socket(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Forbidden", 403)
 		return
 	}
-	s.serveSocket(w, r, socketPrincipal{role: "owner", url: s.url, valid: func() bool { return s.sessions.valid(token) }})
+	// Launcher management is bound to the connection the launcher window
+	// opens (scope=launcher); every other owner connection is a gameplay
+	// display with exactly the paired-display capability set.
+	scope := scopeGameplay
+	if r.URL.Query().Get("scope") == scopeLauncher {
+		scope = scopeLauncher
+	}
+	s.serveSocket(w, r, socketPrincipal{role: "owner", scope: scope, url: s.url, valid: func() bool { return s.sessions.valid(token) }})
 }
 
 type socketPrincipal struct {
-	role, url, deviceID, token string
-	valid                      func() bool
-	remote                     *remoteManager
-	epoch                      uint64
+	role, scope, url, deviceID, token string
+	valid                             func() bool
+	remote                            *remoteManager
+	epoch                             uint64
 }
 
 func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal socketPrincipal) {
@@ -66,7 +73,7 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 		_ = conn.CloseNow()
 		return
 	}
-	s.sockets[conn] = struct{}{}
+	s.sockets[conn] = principal.scope
 	s.socketMu.Unlock()
 	defer func() { _ = conn.CloseNow(); s.socketMu.Lock(); delete(s.sockets, conn); s.socketMu.Unlock() }()
 	conn.SetReadLimit(1 << 20)
@@ -124,6 +131,32 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 	if send(map[string]any{"name": "loadingProgress", "message": s.loadingStatus()}) != nil {
 		return
 	}
+	// Account epoch: every connection learns the epoch it was opened under.
+	// A commander switch closes gameplay connections (see accountSwitched);
+	// the launcher connection stays open and is told the new epoch.
+	connEpoch, epochChanged := s.account.watch()
+	if send(map[string]any{"name": "accountEpoch", "message": map[string]any{"epoch": connEpoch}}) != nil {
+		return
+	}
+	go func() {
+		changed := epochChanged
+		for {
+			select {
+			case <-readCtx.Done():
+				return
+			case <-changed:
+				var epoch uint64
+				epoch, changed = s.account.watch()
+				if principal.scope != scopeLauncher {
+					conn.CloseNow()
+					return
+				}
+				if send(map[string]any{"name": "accountEpoch", "message": map[string]any{"epoch": epoch}}) != nil {
+					return
+				}
+			}
+		}
+	}()
 	if s.game != nil && s.g2e {
 		go func() {
 			ticker := time.NewTicker(time.Second)
@@ -269,6 +302,7 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 			RequestID string          `json:"requestId"`
 			Name      string          `json:"name"`
 			Message   json.RawMessage `json:"message"`
+			Epoch     *uint64         `json:"epoch"`
 		}
 		if kind != websocket.MessageText || json.Unmarshal(data, &request) != nil || len(request.RequestID) > 128 || len(request.Name) > 128 {
 			if send(map[string]any{"error": "Invalid request"}) != nil {
@@ -277,6 +311,18 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 			continue
 		}
 		response := map[string]any{"requestId": request.RequestID, "name": request.Name}
+		// Reject anything issued under a previous commander: a gameplay
+		// connection opened before the switch is no longer valid at all, and
+		// a request stamped with an older epoch never runs.
+		epoch := s.account.current()
+		response["epoch"] = epoch
+		if (principal.scope != scopeLauncher && connEpoch != epoch) || (request.Epoch != nil && *request.Epoch != epoch && !epochExempt[request.Name]) {
+			response["error"] = staleEpochError
+			if send(response) != nil || principal.scope != scopeLauncher {
+				return
+			}
+			continue
+		}
 		navigationNonempty, surveyNonempty, shipNonempty, workspaceNonempty := false, false, false, false
 		// D1: one capability set for every trusted gameplay display; launcher
 		// management stays on the local launcher (see rpc_authority.go).
@@ -525,6 +571,18 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 			}
 		default:
 			response["error"] = "Not implemented in this offline preview"
+		}
+		if now := s.account.current(); now != epoch {
+			if epochExempt[request.Name] {
+				// The account chooser itself switched the commander: report
+				// the epoch its result belongs to.
+				response["epoch"] = now
+			} else {
+				// The commander changed while this request ran: never deliver
+				// a reply computed for (or across) the previous commander.
+				delete(response, "message")
+				response["error"] = staleEpochError
+			}
 		}
 		if send(response) != nil {
 			return

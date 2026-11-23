@@ -50,7 +50,7 @@ func setOf(names ...string) map[string]bool {
 // through to the dispatcher, which rejects them.
 func rpcAllowed(principal socketPrincipal, name string) bool {
 	if launcherRPC[name] {
-		return principal.role == "owner"
+		return principal.role == "owner" && principal.scope == scopeLauncher
 	}
 	return true
 }

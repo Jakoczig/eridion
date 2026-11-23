@@ -67,7 +67,7 @@ async function main () {
       await screenshot('galaxy-' + viewport); report.pages.push({ viewport, page: 'galaxy', projections })
     }
     // Use the ordinary owner-authenticated WebSocket, with no Wails bindings.
-    await evaluate('window.g2gRPC=async(name,message)=>{const session=await fetch(\'/auth/session\',{method:\'POST\'});if(!session.ok)throw Error(\'owner session\');return new Promise((resolve,reject)=>{const ws=new WebSocket(location.origin.replace(\'http\',\'ws\'));const id=\'g2g-check\';ws.onopen=()=>ws.send(JSON.stringify({name,message,requestId:id}));ws.onmessage=e=>{const r=JSON.parse(e.data);if(r.requestId===id){ws.close();r.error?reject(Error(r.error)):resolve(r.message)}};ws.onerror=reject})}')
+    await evaluate('window.g2gRPC=async(name,message)=>{const session=await fetch(\'/auth/session\',{method:\'POST\'});if(!session.ok)throw Error(\'owner session\');return new Promise((resolve,reject)=>{const ws=new WebSocket(location.origin.replace(\'http\',\'ws\')+\'/?scope=launcher\');const id=\'g2g-check\';ws.onopen=()=>ws.send(JSON.stringify({name,message,requestId:id}));ws.onmessage=e=>{const r=JSON.parse(e.data);if(r.requestId===id){ws.close();r.error?reject(Error(r.error)):resolve(r.message)}};ws.onerror=reject})}')
     await evaluate('g2gRPC(\'setGoCompanion\',{charge:true,jump:true,restore:true,owner:true,allViewers:false,devices:[],closeMode:\'tray\'})')
     await navigate('/nav/galaxy', 'GALAXY MAP'); host.child.stdin.write('jump\n')
     await waitFor(() => evaluate('!!document.querySelector(\'[aria-label="Automatic FSD display"]\')'))

@@ -391,6 +391,7 @@ func TestSlowJournalSelectionCannotWriteAfterProfileReleased(t *testing.T) {
 	defer release()
 	req := httptest.NewRequest("POST", s.URL()+"/owner/journal", body)
 	req.Header.Set("Origin", s.URL())
+	req.Header.Set("X-Eridion-Scope", "launcher")
 	parsed, _ := url.Parse(s.URL())
 	for _, cookie := range owner.Jar.Cookies(parsed) {
 		req.AddCookie(cookie)

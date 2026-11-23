@@ -34,14 +34,14 @@ function transport () {
   const timers = new Map()
   const sockets = []
   const browser = {
-    window: { location: { protocol: 'http:', host: '127.0.0.1:1' }, fetch: async () => ({ ok: true, json: async () => ({ role: 'owner', prototype: { stage: 'G2E' } }) }), localStorage: { getItem: () => null }, sessionStorage: { getItem: () => null }, dispatchEvent: () => {} },
+    window: { location: { protocol: 'http:', host: '127.0.0.1:1', pathname: '/nav/map' }, fetch: async () => ({ ok: true, json: async () => ({ role: 'owner', prototype: { stage: 'G2E' } }) }), localStorage: { getItem: () => null }, sessionStorage: { getItem: () => null }, dispatchEvent: () => {} },
     setTimeout: (callback, delay) => { const id = {}; timers.set(id, { callback, delay }); return id },
     clearTimeout: id => timers.delete(id),
     CustomEvent: class { constructor (name, init) { this.type = name; this.detail = init?.detail } }
   }
   browser.WebSocket = class {
     static OPEN = 1
-    constructor () { this.readyState = 0; this.sent = []; sockets.push(this) }
+    constructor (url) { this.url = url; this.readyState = 0; this.sent = []; sockets.push(this) }
     send (raw) { this.sent.push(raw) }
     close () { this.readyState = 3; this.onclose() }
   }
@@ -150,4 +150,45 @@ test('disabled profiling adds no JSON pass to socket traffic', () => {
     profiler.stop()
   } finally { console.log = log }
   assert.ok(window.__perf.entries.some(e => e.type === 'ws-send'))
+})
+
+// Task 13 (audit F2/F5): the launcher window connects with the launcher
+// scope, every gameplay page without it, and paired (https) displays never.
+test('only the launcher page opens a launcher-scoped socket', () => {
+  const t = transport()
+  const url = t.socket.socketURL
+  assert.equal(url({ protocol: 'http:', host: 'h:1', pathname: '/launcher' }), 'ws://h:1/?scope=launcher')
+  assert.equal(url({ protocol: 'http:', host: 'h:1', pathname: '/launcher/settings' }), 'ws://h:1/?scope=launcher')
+  assert.equal(url({ protocol: 'http:', host: 'h:1', pathname: '/nav/map' }), 'ws://h:1')
+  assert.equal(url({ protocol: 'http:', host: 'h:1', pathname: '/launchery' }), 'ws://h:1')
+  assert.equal(url({ protocol: 'https:', host: 'h:1', pathname: '/launcher' }), 'wss://h:1')
+})
+
+test('requests carry the account epoch and replies from another epoch are rejected', async () => {
+  const t = transport()
+  const ws = await t.open()
+  assert.equal(ws.url, 'ws://127.0.0.1:1')
+  ws.onmessage({ data: JSON.stringify({ name: 'accountEpoch', message: { epoch: 5 } }) })
+  const stale = t.socket.sendEvent('getGoCommanderOverview', null, 0)
+  const request = JSON.parse(ws.sent.at(-1))
+  assert.equal(request.epoch, 5)
+  ws.onmessage({ data: JSON.stringify({ requestId: request.requestId, epoch: 6, message: { fid: 'SYNTHETIC-A' } }) })
+  await assert.rejects(stale, /Commander changed/)
+  const fresh = t.socket.sendEvent('getGoCommanderOverview', null, 0)
+  const next = JSON.parse(ws.sent.at(-1))
+  ws.onmessage({ data: JSON.stringify({ requestId: next.requestId, epoch: 5, message: { fid: 'SYNTHETIC-A' } }) })
+  assert.deepEqual(await fresh, { fid: 'SYNTHETIC-A' })
+})
+
+test('an epoch change on an open connection cancels requests issued for the previous commander', async () => {
+  const t = transport()
+  const ws = await t.open()
+  ws.onmessage({ data: JSON.stringify({ name: 'accountEpoch', message: { epoch: 1 } }) })
+  const queued = t.socket.sendEvent('importGoItinerary', { name: 'Queued' }, 0)
+  ws.onmessage({ data: JSON.stringify({ name: 'accountEpoch', message: { epoch: 2 } }) })
+  await assert.rejects(queued, /Connection interrupted/)
+  const after = t.socket.sendEvent('getGoItinerary', null, 0)
+  assert.equal(JSON.parse(ws.sent.at(-1)).epoch, 2)
+  ws.onmessage({ data: JSON.stringify({ requestId: JSON.parse(ws.sent.at(-1)).requestId, epoch: 2, message: [] }) })
+  assert.deepEqual(await after, [])
 })

@@ -76,6 +76,9 @@ func (s *Server) startGame(ctx context.Context, opts Options) {
 			s.providers.PinAccount(fid)
 		}
 	}, DisplayAccount: func(fid string, verifiedSingle, authoritative bool) {
+		// A changed commander invalidates every gameplay connection and every
+		// request issued under the previous commander.
+		s.accountSwitched(fid)
 		if s.remote == nil {
 			return
 		}
@@ -132,7 +135,7 @@ func (s *Server) prototype() map[string]any {
 	return marker
 }
 func (s *Server) ownerJournal(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" || !s.sameOrigin(r) || !s.sessions.valid(s.sessions.token(r)) {
+	if r.Method != "POST" || !s.sameOrigin(r) || !s.sessions.valid(s.sessions.token(r)) || !launcherHTTP(r.Header.Get("X-Eridion-Scope")) {
 		http.Error(w, "Forbidden", 403)
 		return
 	}

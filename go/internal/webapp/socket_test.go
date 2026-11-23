@@ -16,7 +16,9 @@ func dialOwner(t *testing.T, s *Server) (*websocket.Conn, context.Context) {
 	client := ownerClient(t, s)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	t.Cleanup(cancel)
-	conn, _, err := websocket.Dial(ctx, strings.Replace(s.URL(), "http:", "ws:", 1), &websocket.DialOptions{HTTPClient: client, HTTPHeader: http.Header{"Origin": []string{s.URL()}}})
+	// The owner fixture acts as the launcher; main gameplay displays use
+	// dialScoped(t, s, "") (see account_epoch_test.go).
+	conn, _, err := websocket.Dial(ctx, strings.Replace(s.URL(), "http:", "ws:", 1)+"/?scope=launcher", &websocket.DialOptions{HTTPClient: client, HTTPHeader: http.Header{"Origin": []string{s.URL()}}})
 	if err != nil {
 		t.Fatal(err)
 	}
