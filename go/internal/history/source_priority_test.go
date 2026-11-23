@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/Jakoczig/eridion/go/internal/journal"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -298,5 +299,88 @@ func TestAuditMergeJournalRanksFollowsAuthority(t *testing.T) {
 	fresh := []ResolvedRank{{Category: "combat", Rank: "8", Source: "frontier", Authority: "frontier"}}
 	if c := rankByCategory(MergeJournalRanks(fresh, journal), "combat"); c.Rank != "8" || c.Source != "frontier" || c.Progress != nil {
 		t.Fatalf("fresh Frontier replaced: %+v", c)
+	}
+}
+
+// G3H review finding 1: Frontier/Inara snapshots carry no observation time.
+// The latest fetch must stay effective however many snapshots a commander
+// has accumulated, and fetch times compare as instants, not as raw text.
+func TestAuditLatestSnapshotWinsBeyondWindow(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var last time.Time
+	for i := 0; i < 300; i++ {
+		last = start.Add(time.Duration(i) * time.Hour)
+		saveFacts(t, s, "frontier", time.Time{}, last, map[string]any{"credits": strconv.Itoa(i)})
+	}
+	facts, err := s.EffectiveFacts(context.Background(), "SYNTHETIC-A", "commander", last.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var credits *EffectiveFact
+	for i := range facts {
+		if facts[i].Field == "credits" {
+			credits = &facts[i]
+		}
+	}
+	if credits == nil || string(credits.Value) != `"299"` || !credits.Eligible || credits.Stale {
+		t.Fatalf("latest of 300 snapshots not effective: %+v", credits)
+	}
+
+	// Same second, fractional later fetch: "…:00Z" must not sort after "…:00.5Z".
+	s2, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	at := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+	saveFacts(t, s2, "inara", time.Time{}, at, map[string]any{"credits": "1"})
+	saveFacts(t, s2, "inara", time.Time{}, at.Add(500*time.Millisecond), map[string]any{"credits": "2"})
+	facts, _ = s2.EffectiveFacts(context.Background(), "SYNTHETIC-A", "commander", at.Add(time.Minute))
+	for _, f := range facts {
+		if f.Field == "credits" && string(f.Value) != `"2"` {
+			t.Fatalf("earlier fetch won the raw-text tie-break: %s", f.Value)
+		}
+	}
+}
+
+// Task 17 / F24: Inara rank evidence reaches the shared representation with
+// its own progress (including fractional percentages); progress is
+// attributed only to the level of the source that reported it.
+func TestAuditInaraRanksWithProgress(t *testing.T) {
+	now := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	saveFacts(t, s, "inara", time.Time{}, now, map[string]any{
+		"ranks":        []map[string]string{{"name": "combat", "value": "5"}, {"name": "exploration", "value": "13"}},
+		"rankProgress": []map[string]string{{"name": "combat", "value": "23.45"}, {"name": "exploration", "value": "100"}},
+	})
+	facts, _ := s.EffectiveFacts(context.Background(), "SYNTHETIC-A", "commander", now.Add(time.Minute))
+	combat := rankByCategory(ResolveRanks(facts), "combat")
+	explore := rankByCategory(ResolveRanks(facts), "explore")
+	if combat == nil || combat.Rank != "5" || combat.Source != "inara" || combat.Progress == nil || *combat.Progress != "23.45" || combat.ProgressSource != "inara" {
+		t.Fatalf("Inara combat = %+v", combat)
+	}
+	if explore == nil || explore.Rank != "13" || explore.Progress == nil || *explore.Progress != "100" {
+		t.Fatalf("Inara explore = %+v", explore)
+	}
+	// A fresh Frontier level wins; Inara's progress belongs to Inara's level
+	// and is not attached to the Frontier level, even when it is equal.
+	saveFacts(t, s, "frontier", time.Time{}, now.Add(time.Second), map[string]any{"ranks": map[string]string{"combat": "8", "explore": "13"}})
+	facts, _ = s.EffectiveFacts(context.Background(), "SYNTHETIC-A", "commander", now.Add(time.Minute))
+	combat = rankByCategory(ResolveRanks(facts), "combat")
+	explore = rankByCategory(ResolveRanks(facts), "explore")
+	if combat == nil || combat.Rank != "8" || combat.Source != "frontier" || combat.Progress != nil {
+		t.Fatalf("Frontier combat = %+v", combat)
+	}
+	if explore == nil || explore.Source != "frontier" || explore.Progress != nil {
+		t.Fatalf("Frontier explore inherited Inara progress: %+v", explore)
 	}
 }

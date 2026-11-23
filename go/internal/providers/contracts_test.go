@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"github.com/Jakoczig/eridion/go/internal/journal"
 	"github.com/Jakoczig/eridion/go/internal/privatefs"
 	"io"
@@ -380,5 +381,43 @@ func TestLiveAccountSwitchCannotWaitForVaultUnlock(t *testing.T) {
 	}
 	if m.fid != "SYNTHETIC-B" {
 		t.Fatal("live identity lost while vault pending")
+	}
+}
+
+// Task 8 / F10: Inara credits keep cash, total assets and debt distinct.
+// Statistics' Current_Wealth is total assets; cash and loan come from the
+// same session's LoadGame. Without witnessed cash and loan no credits event is
+// sent (never wealth as cash, never an invented zero).
+func TestAuditInaraCreditsCoherent(t *testing.T) {
+	m, _ := testManager(t, func(*http.Request) (*http.Response, error) { t.Fatal("unexpected network"); return nil, nil })
+	cred := Credential{APIKey: "fixture-key", Commander: "Fixture CMDR"}
+	stats := `{"timestamp":"2026-11-14T12:00:02Z","event":"Statistics","Bank_Account":{"Current_Wealth":500}}`
+	encode := func() (map[string]any, error) {
+		e := event(t, stats)
+		m.mu.Lock()
+		raw, _, _, err := m.encode("inara", e, object(e.Raw), cred)
+		m.mu.Unlock()
+		if err != nil {
+			return nil, err
+		}
+		events := object(raw)["events"].([]any)
+		return events[0].(map[string]any)["eventData"].(map[string]any), nil
+	}
+	m.Observe(event(t, `{"timestamp":"2026-11-14T12:00:01Z","event":"LoadGame","FID":"SYNTHETIC-A","Commander":"Fixture CMDR","Credits":100,"Loan":25}`), journal.Live)
+	data, err := encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(data["commanderCredits"]) != "100" || fmt.Sprint(data["commanderAssets"]) != "500" || fmt.Sprint(data["commanderLoan"]) != "25" {
+		t.Fatalf("credits snapshot = %v", data)
+	}
+	for _, reset := range []string{
+		`{"timestamp":"2026-11-14T12:00:03Z","event":"LoadGame","FID":"SYNTHETIC-A","Commander":"Fixture CMDR"}`,
+		`{"timestamp":"2026-11-14T12:00:04Z","event":"Fileheader","gameversion":"4.1.0.0","build":"fixture"}`,
+	} {
+		m.Observe(event(t, reset), journal.Live)
+		if data, err := encode(); err == nil {
+			t.Fatalf("credits sent without witnessed cash and loan: %v", data)
+		}
 	}
 }

@@ -86,6 +86,11 @@ func (m *Manager) Historical(ctx context.Context, selection HistorySelection, co
 			if err != nil {
 				row.Status = "held"
 				row.Reason = "Unsupported or incomplete event fields"
+				if selection.Provider == "inara" && r.Event.Type == "Statistics" {
+					// Task 8 / F10: credits need cash and loan witnessed by the
+					// same session's LoadGame; a historical row has neither.
+					row.Reason = "Inara credits need cash and loan from the same session's LoadGame; not sent historically"
+				}
 			} else {
 				// Only the event array is returned, never credential-bearing request headers.
 				root := object(body)

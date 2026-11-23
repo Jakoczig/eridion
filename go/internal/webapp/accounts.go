@@ -77,7 +77,8 @@ func (s *Server) accountRPC(ctx context.Context, name string, raw json.RawMessag
 		if !found || !defaultFound {
 			return nil, errors.New("Select a verified local journal account")
 		}
-		previousSettings := s.game.Accounts()
+		previousState := s.game.SnapshotAccounts()
+		previousSettings := previousState.Settings
 		confirmedChoice = !q.Multiple || previousSettings.Multiple
 		previousPin := s.game.PinnedAccount()
 		// Pin the target before changing the display so no provider work can
@@ -93,7 +94,7 @@ func (s *Server) accountRPC(ctx context.Context, name string, raw json.RawMessag
 			s.providers.PinAccount(target)
 		}
 		restore := func() {
-			_ = s.game.RestoreAccounts(previousSettings)
+			_ = s.game.RestoreAccountsState(previousState)
 			if s.providers != nil {
 				s.providers.PinAccount(previousPin)
 			}

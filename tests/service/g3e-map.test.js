@@ -207,3 +207,31 @@ test('search results are bound to their query; stale, failed and unmounted repli
     orphan.resolve({ point: { name: 'Zeta', coordinates: [6, 6, 6] } }); await tick()
   } finally { h.unmount() }
 })
+
+// G3H review finding 3: a different query submitted while a search is pending
+// supersedes it (the earlier reply is discarded); an identical duplicate
+// submission is still blocked.
+test('a new query submitted while a search is pending supersedes it', async () => {
+  const h = harness('go-unified-galaxy', {})
+  const pending = []
+  h.props.policy = { galaxyMap: false, localAtlas: false }
+  h.props.sendEvent = (name, message) => new Promise(resolve => pending.push({ name, message, resolve }))
+  const type = value => { h.elements('input')[0].props.onChange({ target: { value } }); h.html() }
+  const submit = () => h.elements('form')[0].props.onSubmit({ preventDefault () {} })
+  const tick = () => new Promise(resolve => setImmediate(resolve))
+  try {
+    h.html()
+    type('Alpha'); submit(); submit(); await tick()
+    assert.equal(pending.length, 1, 'duplicate submission not blocked')
+    type('Beta'); h.html()
+    assert.equal(h.elements('button').find(b => b.props.children === 'Search').props.disabled, false, 'new query cannot be submitted while the old one is pending')
+    submit(); await tick()
+    assert.equal(pending.length, 2, 'new query was dropped')
+    assert.equal(pending[1].message.name, 'Beta')
+    pending[1].resolve({ point: { name: 'Beta', coordinates: [2, 2, 2] }, community: { enabled: false } }); await tick()
+    pending[0].resolve({ point: { name: 'Alpha', coordinates: [1, 1, 1] }, community: { enabled: false } }); await tick()
+    const html = h.html()
+    assert.match(html, /Beta/); assert.doesNotMatch(html, /<p>Alpha<\/p>/)
+    assert.ok(h.elements('button').some(b => b.props.children === 'View System'))
+  } finally { h.unmount() }
+})

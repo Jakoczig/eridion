@@ -297,12 +297,34 @@ func (s *Service) SetDefaultAccount(fid string) error {
 	return nil
 }
 
-// RestoreAccounts reinstates previously read settings exactly, for rollback
-// after a failed multi-step account change.
-func (s *Service) RestoreAccounts(prev AccountSettings) error {
+// AccountsState is the complete account preference state, including the
+// recovery reasons, for rollback after a failed multi-step account change.
+type AccountsState struct {
+	Settings                      AccountSettings
+	accountsError, defaultInvalid string
+}
+
+// SnapshotAccounts captures the current account state for RestoreAccountsState.
+func (s *Service) SnapshotAccounts() AccountsState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.applyAccountsLocked(prev)
+	return AccountsState{Settings: s.accounts, accountsError: s.accountsError, defaultInvalid: s.defaultInvalid}
+}
+
+// RestoreAccountsState reinstates a snapshot exactly. The recovery reasons
+// are restored before the settings are applied and published, so a damaged
+// or unverified default is never published as host-authorized.
+func (s *Service) RestoreAccountsState(st AccountsState) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.accountsError, s.defaultInvalid = st.accountsError, st.defaultInvalid
+	if err := s.applyAccountsLocked(st.Settings); err != nil {
+		return err
+	}
+	if !s.accounts.Multiple && s.opts.ProviderAccount != nil {
+		s.opts.ProviderAccount(s.hostAccountLocked())
+	}
+	return nil
 }
 
 func (s *Service) applyAccountsLocked(next AccountSettings) error {

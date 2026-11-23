@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"github.com/Jakoczig/eridion/go/internal/fieldexport"
 	"image"
 	"image/color"
 	"image/png"
@@ -11,7 +12,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -103,25 +103,7 @@ func (h *nativeHost) Bind(c *Controller) {
 		if err != nil {
 			return err
 		}
-		if path == "" {
-			return errors.New("Export cancelled")
-		}
-		if !strings.EqualFold(filepath.Ext(path), ".csv") {
-			return errors.New("Choose a CSV destination")
-		}
-		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-		if err != nil {
-			return errors.New("Choose a new CSV filename; existing files are preserved")
-		}
-		_, err = f.WriteString(data)
-		if err == nil {
-			err = f.Sync()
-		}
-		closeErr := f.Close()
-		if err != nil {
-			return err
-		}
-		return closeErr
+		return fieldexport.Write(path, data)
 	})
 }
 func (h *nativeHost) Open(localURL string) error {

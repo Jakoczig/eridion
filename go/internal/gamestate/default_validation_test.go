@@ -93,3 +93,36 @@ func TestAuditDefaultAdoptedOnlyAfterCatchUp(t *testing.T) {
 		t.Fatalf("default adopted from the cache before catch-up: %q required=%v", d, s.DefaultRequired())
 	}
 }
+
+// G3H review finding 2: rolling back a failed launcher account change restores
+// the recovery state as well as the settings, so a damaged or unverified
+// default keeps asking for the launcher choice.
+func TestAuditAccountRollbackKeepsRecoveryState(t *testing.T) {
+	for name, raw := range map[string]string{
+		"damaged preference": `{"multiple":`,
+		"unverified default": `{"version":2,"multiple":false,"selected":"","defaultFID":"SYNTHETIC-GONE"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir, profile := t.TempDir(), t.TempDir()
+			appendEvent(t, dir, `{"event":"LoadGame","timestamp":"2026-11-20T10:00:00Z","FID":"SYNTHETIC-A"}`)
+			writeAccounts(t, profile, raw)
+			s, _, stop := pinRecorder(t, profile, dir)
+			defer stop()
+			waitState(t, s, func(v Summary) bool { return !v.ImportInProgress && v.EventsRead == 1 })
+			before := s.SnapshotAccounts()
+			if !s.DefaultRequired() {
+				t.Fatal("fixture does not require a default")
+			}
+			if err := s.SetDefaultAccount("SYNTHETIC-A"); err != nil {
+				t.Fatal(err)
+			}
+			// A later step of the launcher change failed: roll back.
+			if err := s.RestoreAccountsState(before); err != nil {
+				t.Fatal(err)
+			}
+			if !s.DefaultRequired() || s.AccountRecovery() == "" || s.PinnedAccount() != "" {
+				t.Fatalf("rollback lost the recovery state: required=%v recovery=%q pin=%q", s.DefaultRequired(), s.AccountRecovery(), s.PinnedAccount())
+			}
+		})
+	}
+}

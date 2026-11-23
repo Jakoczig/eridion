@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/Jakoczig/eridion/go/internal/history"
+	"math/big"
 	"sort"
 	"strings"
 	"time"
@@ -122,14 +123,27 @@ func normalizedCommander(id, kind, fid, name string, data map[string]any, now ti
 		}
 		x.Fields["name"] = name
 		if ranks, ok := d["commanderRanksPilot"].([]any); ok && len(ranks) <= 32 {
-			safe := []map[string]string{}
+			// Task 17 / F24: levels within Inara's documented bounds and, for
+			// those levels, their reported progress (fraction -> percent).
+			safe, progress := []map[string]string{}, []map[string]string{}
 			for _, r := range ranks {
 				v, _ := r.(map[string]any)
-				if n, ok := v["rankValue"].(json.Number); ok && text(v["rankName"]) != "" {
-					safe = append(safe, map[string]string{"name": text(v["rankName"]), "value": string(n)})
+				name := text(v["rankName"])
+				n, ok := v["rankValue"].(json.Number)
+				if !ok || name == "" || !inaraRankInRange(name, n) {
+					continue
+				}
+				safe = append(safe, map[string]string{"name": name, "value": string(n)})
+				if p, ok := v["rankProgress"].(json.Number); ok {
+					if percent, ok := fractionPercent(p); ok {
+						progress = append(progress, map[string]string{"name": name, "value": percent})
+					}
 				}
 			}
 			x.Fields["ranks"] = safe
+			if len(progress) > 0 {
+				x.Fields["rankProgress"] = progress
+			}
 		}
 	default:
 		return x, errors.New("Unsupported commander source")
@@ -299,4 +313,31 @@ func normalizeCAPIModules(raw any) []CAPIModule {
 		out = append(out, m)
 	}
 	return out
+}
+
+// inaraRankBound is the highest valid level: Empire and Federation navy ranks
+// run 0-14, every pilot rank 0-13 (Inara API, setCommanderRankPilot).
+func inaraRankBound(name string) int64 {
+	switch strings.ToLower(name) {
+	case "empire", "federation":
+		return 14
+	}
+	return 13
+}
+
+func inaraRankInRange(name string, n json.Number) bool {
+	v, err := n.Int64()
+	return err == nil && v >= 0 && v <= inaraRankBound(name)
+}
+
+// fractionPercent converts Inara's 0..1 progress fraction to exact percent
+// decimal text ("0.35" -> "35").
+func fractionPercent(n json.Number) (string, bool) {
+	r, ok := new(big.Rat).SetString(n.String())
+	if !ok || r.Sign() < 0 || r.Cmp(big.NewRat(1, 1)) > 0 {
+		return "", false
+	}
+	r.Mul(r, big.NewRat(100, 1))
+	text := strings.TrimRight(strings.TrimRight(r.FloatString(6), "0"), ".")
+	return text, true
 }

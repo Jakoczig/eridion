@@ -28,7 +28,10 @@ type Manager struct {
 	// blocked is the explicit "no commander chosen yet" state: no account
 	// namespace, observation, upload, read or authorization runs until the
 	// launcher (or single-commander adoption) pins a real commander.
-	blocked                                        bool
+	blocked bool
+	// sessionCash/sessionLoan are the current session's witnessed LoadGame
+	// Credits and Loan (Task 8 / F10); empty when unknown.
+	sessionCash, sessionLoan                       json.Number
 	accountConfigs                                 map[string]map[string]storedConfig
 	hostCooldown                                   map[string]time.Time
 	station                                        stationSession
@@ -413,6 +416,7 @@ func (m *Manager) Observe(e journal.Event, phase journal.Phase) {
 			m.station = stationSession{}
 			m.fid = ""
 			m.name = ""
+			m.sessionCash, m.sessionLoan = "", ""
 			m.system = ""
 			m.position = nil
 			m.address = nil
@@ -425,6 +429,7 @@ func (m *Manager) Observe(e journal.Event, phase journal.Phase) {
 		m.identity = ""
 		m.fid = ""
 		m.name = ""
+		m.sessionCash, m.sessionLoan = "", ""
 		m.system = ""
 		m.position = nil
 		m.address = nil
@@ -441,12 +446,19 @@ func (m *Manager) Observe(e journal.Event, phase journal.Phase) {
 			m.fid = e.FID
 			m.name = text(v["Commander"])
 		}
+		m.sessionCash, m.sessionLoan = "", ""
+		if cash, ok := v["Credits"].(json.Number); ok && e.FID != "" && validID(cash) {
+			if loan, ok := v["Loan"].(json.Number); ok && validID(loan) {
+				m.sessionCash, m.sessionLoan = cash, loan
+			}
+		}
 		m.odyssey, _ = v["Odyssey"].(bool)
 		return
 	}
 	if e.Type == "Shutdown" {
 		m.identity = ""
 		m.fid = ""
+		m.sessionCash, m.sessionLoan = "", ""
 		return
 	}
 	if e.Type == "FSDJump" || e.Type == "Location" || e.Type == "CarrierJump" {
@@ -590,6 +602,29 @@ func (m *Manager) dispatch(id string) {
 		return
 	}
 	s.noNewLast = false
+	if err == nil && status >= 200 && status < 300 && id == "edsm" {
+		// Task 7 / F08: one truthful durable outcome per event from the
+		// per-event receipts; only confirmed events count as sent.
+		confirmed := 0
+		for i, o := range edsmEventOutcomes(raw, len(batch)) {
+			m.outcomeLocked(batch[i:i+1], o.Status, o.Reason)
+			if o.Status == "confirmed" {
+				confirmed++
+				s.sent++
+				s.counts[batch[i].category]++
+			}
+		}
+		if confirmed == len(batch) {
+			s.lastSuccess = m.opts.Now().UTC().Format(time.RFC3339)
+			s.lastError = ""
+		} else {
+			if confirmed > 0 {
+				s.lastSuccess = m.opts.Now().UTC().Format(time.RFC3339)
+			}
+			s.lastError = "EDSM did not confirm every event; see publication outcomes"
+		}
+		return
+	}
 	if err == nil && status >= 200 && status < 300 && accepted(id, raw) {
 		m.outcomeLocked(batch, "confirmed", "Recipient acceptance contract satisfied")
 		for _, item := range batch {
@@ -616,6 +651,14 @@ func (m *Manager) dispatch(id string) {
 		jitter := time.Duration(q.key[0]%15) * time.Second
 		s.next = m.opts.Now().Add(time.Minute*time.Duration(1<<q.attempts) + jitter)
 		s.queue = append(batch, s.queue...)
+	} else if err == nil && (status == 429 || status == 503) {
+		// Task 7 / F08: refusals exhausted (or the refusal raced a
+		// cancellation): a terminal outcome, never residue in "queued".
+		reason := "Recipient refused repeatedly (HTTP " + strconv.Itoa(status) + "); not retried"
+		if requestCancelled {
+			reason = "Recipient refused (HTTP " + strconv.Itoa(status) + ") while publication was being cancelled; not retried"
+		}
+		m.outcomeLocked(batch, "failed", reason)
 	}
 }
 func (m *Manager) request(ctx context.Context, method, endpoint, ct string, body []byte, bearer string) ([]byte, int, error) {
