@@ -45,7 +45,9 @@ func TestAuditGameplayParity(t *testing.T) {
 		t.Fatal("pair", status)
 	}
 	viewer := pairedSocket(t, client, remoteURL)
-	owner, _ := dialOwner(t, s)
+	// The main gameplay display is an owner-session connection without the
+	// launcher scope (dialOwner acts as the launcher).
+	owner := dialScoped(t, s, "")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	for name := range gameplayRPC {
@@ -59,11 +61,13 @@ func TestAuditGameplayParity(t *testing.T) {
 		}
 	}
 	for name := range launcherRPC {
-		v := rpcWithMessage(t, ctx, viewer, name, map[string]any{})
-		var message string
-		_ = json.Unmarshal(v["error"], &message)
-		if message != launcherOnlyError || v["message"] != nil {
-			t.Fatalf("paired display reached launcher RPC %s: %s", name, v["error"])
+		for display, conn := range map[string]*websocket.Conn{"paired": viewer, "main": owner} {
+			v := rpcWithMessage(t, ctx, conn, name, map[string]any{})
+			var message string
+			_ = json.Unmarshal(v["error"], &message)
+			if message != launcherOnlyError || v["message"] != nil {
+				t.Fatalf("%s display reached launcher RPC %s: %s", display, name, v["error"])
+			}
 		}
 	}
 }
