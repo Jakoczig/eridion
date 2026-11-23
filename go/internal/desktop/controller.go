@@ -3,6 +3,7 @@ package desktop
 import (
 	"context"
 	"errors"
+	"github.com/Jakoczig/eridion/go/internal/fieldexport"
 	"sync"
 	"sync/atomic"
 	"unicode/utf8"
@@ -44,8 +45,11 @@ func (c *Controller) BindCSV(f func(string, string) error) {
 	defer c.mu.Unlock()
 	c.saveCSV = f
 }
+
+// SaveFieldCSV accepts exactly the filenames the web exports emit
+// (fieldexport is the shared contract; Task 19 / F25).
 func (c *Controller) SaveFieldCSV(name, data string) error {
-	if (name != "daedalus-itinerary.csv" && name != "daedalus-private-bgs.csv") || len(data) > 2<<20 {
+	if !fieldexport.Allowed(name) || len(data) > fieldexport.MaxBytes {
 		return errors.New("Invalid field export")
 	}
 	c.mu.Lock()

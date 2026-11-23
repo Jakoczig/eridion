@@ -6,6 +6,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"errors"
+	"github.com/Jakoczig/eridion/go/internal/fieldexport"
 	"github.com/Jakoczig/eridion/go/internal/fieldops"
 	"strconv"
 	"strings"
@@ -155,9 +156,9 @@ func (s *Server) fieldRPC(ctx context.Context, name string, raw json.RawMessage)
 		if e := w.Error(); e != nil {
 			return nil, e
 		}
-		filename := "eridion-itinerary.csv"
+		filename := fieldexport.Itinerary
 		if name == "exportGoBGSTally" {
-			filename = "eridion-private-activity.csv"
+			filename = fieldexport.PrivateActivity
 		}
 		if s.saveFieldCSV != nil {
 			if e := s.saveFieldCSV(filename, b.String()); e != nil {
@@ -194,9 +195,9 @@ func (s *Server) fieldRPC(ctx context.Context, name string, raw json.RawMessage)
 		if e := w.Error(); e != nil {
 			return nil, e
 		}
-		filename := "eridion-itinerary.csv"
+		filename := fieldexport.Itinerary
 		if name == "exportGoBGSTally" {
-			filename = "eridion-private-activity.csv"
+			filename = fieldexport.PrivateActivity
 		}
 		if s.saveFieldCSV != nil {
 			if e := s.saveFieldCSV(filename, b.String()); e != nil {
