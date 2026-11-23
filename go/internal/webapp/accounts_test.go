@@ -15,6 +15,9 @@ import (
 	"time"
 )
 
+// The journal-active fallback (no default commander chosen) is not a host
+// authorization: it never moves a grant. Host switches are covered in
+// host_switch_test.go.
 func TestPairedAccountGrantCannotFollowGlobalProfile(t *testing.T) {
 	s, owner, client, remoteURL, code := remoteFixture(t)
 	if status, _, _ := remotePost(t, client, remoteURL+"/auth/pair", remoteURL, map[string]any{"code": code}); status != 200 {

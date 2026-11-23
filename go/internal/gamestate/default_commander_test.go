@@ -28,7 +28,7 @@ func recordingService(t *testing.T, profile, dir string) (*Service, func() []str
 	t.Helper()
 	var mu sync.Mutex
 	var seen []string
-	s, err := NewService(Options{StorageDir: profile, Directory: dir, EnableParity: true, Discovery: journal.DiscoveryOptions{Roots: []string{}}, PollInterval: 5 * time.Millisecond, DisplayAccount: func(fid string, _ bool) {
+	s, err := NewService(Options{StorageDir: profile, Directory: dir, EnableParity: true, Discovery: journal.DiscoveryOptions{Roots: []string{}}, PollInterval: 5 * time.Millisecond, DisplayAccount: func(fid string, _ bool, _ bool) {
 		mu.Lock()
 		seen = append(seen, fid)
 		mu.Unlock()
@@ -46,6 +46,49 @@ func recordingService(t *testing.T, profile, dir string) (*Service, func() []str
 		case <-time.After(3 * time.Second):
 			t.Fatal("service did not stop")
 		}
+	}
+}
+
+// Only a resolved default or launcher selection is a host-authorized display
+// account; the journal-active fallback (no default chosen yet) is not.
+func TestDisplayAccountReportsHostAuthority(t *testing.T) {
+	dir, profile := t.TempDir(), t.TempDir()
+	appendEvent(t, dir, `{"event":"LoadGame","timestamp":"2026-11-20T10:00:00Z","FID":"SYNTHETIC-B"}`)
+	appendEvent(t, dir, `{"event":"LoadGame","timestamp":"2026-11-22T10:00:00Z","FID":"SYNTHETIC-A"}`)
+	var mu sync.Mutex
+	type frame struct {
+		fid           string
+		authoritative bool
+	}
+	var seen []frame
+	s, err := NewService(Options{StorageDir: profile, Directory: dir, EnableParity: true, Discovery: journal.DiscoveryOptions{Roots: []string{}}, PollInterval: 5 * time.Millisecond, DisplayAccount: func(fid string, _ bool, authoritative bool) {
+		mu.Lock()
+		seen = append(seen, frame{fid, authoritative})
+		mu.Unlock()
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- s.Run(ctx) }()
+	defer func() { cancel(); <-done }()
+	waitState(t, s, func(v Summary) bool { return !v.ImportInProgress && v.EventsRead == 2 })
+	mu.Lock()
+	for _, f := range seen {
+		if f.authoritative {
+			t.Fatalf("journal fallback reported as host-authorized: %+v", seen)
+		}
+	}
+	seen = nil
+	mu.Unlock()
+	if err := s.SetDefaultAccount("SYNTHETIC-B"); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) == 0 || seen[len(seen)-1] != (frame{"SYNTHETIC-B", true}) {
+		t.Fatalf("launcher default not reported as host-authorized: %+v", seen)
 	}
 }
 

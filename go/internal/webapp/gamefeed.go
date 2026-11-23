@@ -75,8 +75,13 @@ func (s *Server) startGame(ctx context.Context, opts Options) {
 		if s.providers != nil {
 			s.providers.PinAccount(fid)
 		}
-	}, DisplayAccount: func(fid string, verifiedSingle bool) {
-		if s.remote != nil {
+	}, DisplayAccount: func(fid string, verifiedSingle, authoritative bool) {
+		if s.remote == nil {
+			return
+		}
+		if authoritative {
+			s.remote.hostSelectAccount(fid, verifiedSingle)
+		} else {
 			s.remote.selectAccount(fid, verifiedSingle)
 		}
 	}, StorageDir: persistentDir, OnHistoryReady: func(db *history.Store, seed history.ProviderSeed) {

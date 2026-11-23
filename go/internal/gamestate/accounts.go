@@ -96,6 +96,12 @@ func (s *Service) displayFIDLocked() string {
 func (s *Service) PinnedAccount() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.hostAccountLocked()
+}
+
+// hostAccountLocked is the host-authorized commander: the launcher selection
+// in multi mode, otherwise the resolved default. Empty while unresolved.
+func (s *Service) hostAccountLocked() string {
 	if s.accounts.Multiple {
 		return s.accounts.Selected
 	}

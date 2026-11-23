@@ -31,7 +31,11 @@ type Summary struct {
 	EventsRead       uint64 `json:"eventsRead"`
 }
 type Options struct {
-	DisplayAccount func(string, bool)
+	// DisplayAccount receives the commander every trusted display shows, whether
+	// a single-account legacy grant is verified, and whether the account is
+	// host-authorized (resolved default or launcher selection) rather than the
+	// journal-active fallback used before a default is chosen.
+	DisplayAccount func(fid string, verifiedSingle bool, authoritative bool)
 	// ProviderAccount is told the commander whose provider namespace may now
 	// run when single-commander adoption resolves the default; until then
 	// the provider manager stays blocked. Called with the service lock held.
@@ -132,7 +136,8 @@ func (s *Service) Details() SourceDetails {
 }
 func (s *Service) publishLocked() {
 	if s.opts.DisplayAccount != nil {
-		s.opts.DisplayAccount(s.displayFIDLocked(), !s.accounts.Multiple && s.legacyPairingFID != "" && s.legacyPairingFID == s.displayFIDLocked() && len(s.commanders) == 1)
+		fid := s.displayFIDLocked()
+		s.opts.DisplayAccount(fid, !s.accounts.Multiple && s.legacyPairingFID != "" && s.legacyPairingFID == fid && len(s.commanders) == 1, fid != "" && fid == s.hostAccountLocked())
 	}
 	s.publishProjectionsLocked()
 	for ch := range s.subscribers {
