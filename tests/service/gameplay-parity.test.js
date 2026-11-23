@@ -46,3 +46,16 @@ test('launcher owns the relocated advanced tools', () => {
   const launcher = source('go-companion')
   for (const required of ["'Advanced'", 'DataHistory', 'BuiltinModules', 'ProviderDiagnostics', 'RemoteDisplays']) assert.ok(launcher.includes(required), `launcher lacks ${required}`)
 })
+
+// Audit follow-up (Task 13 / contract 4): the main gameplay display learns a
+// pending launcher commander choice through the bounded gameplay gate, never
+// through the launcher's account RPC (found by the G2N browser gate).
+test('terminal asks only the gameplay account gate, not the launcher account RPC', async () => {
+  const h = harness('go-terminal', name => name === 'getGoAccountGate' ? { choiceRequired: false } : {})
+  Object.assign(h.props, { role: 'owner', stage: 'G2E', connected: true, ready: true, path: '/nav/map' })
+  try {
+    h.html(); await h.flush()
+    assert.ok(h.calls.includes('getGoAccountGate'), 'gate not requested: ' + h.calls.join(','))
+    assert.ok(!h.calls.includes('getGoAccounts'), 'gameplay display called the launcher account RPC')
+  } finally { h.unmount() }
+})

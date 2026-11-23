@@ -18,7 +18,7 @@ import (
 const launcherOnlyError = "Launcher only: change this in the ERIDION launcher"
 
 var gameplayRPC = setOf(
-	"getLoadingStatus", "hostInfo", "getJournalSummary",
+	"getLoadingStatus", "hostInfo", "getJournalSummary", "getGoAccountGate",
 	"getGoWorkspace", "getGoShip", "getGoShipName", "getGoNavigation", "getGoExploration", "getGoEngineeredStatistics",
 	"getGoNavigationContext", "getGoSystem", "lookupGoSystem", "getGoGalaxyLayers", "getGoSpatialView", "getGoAtlasView",
 	"getGoCommunity", "refreshGoCommunity", "refreshGoCommunityGoals", "getGoProviderGameplay",

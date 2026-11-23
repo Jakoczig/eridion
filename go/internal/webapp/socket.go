@@ -338,6 +338,10 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 			response["message"] = s.loadingStatus()
 		case "hostInfo":
 			response["message"] = map[string]any{"urls": []string{principal.url}}
+		case "getGoAccountGate":
+			// Gameplay displays only learn whether a launcher commander choice
+			// is pending; cards, portraits and settings stay on the launcher.
+			response["message"] = map[string]any{"choiceRequired": s.accountChoiceRequired()}
 		case "getGoShipName":
 			if s.game == nil {
 				response["error"] = "Ship identity unavailable"

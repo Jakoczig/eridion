@@ -229,3 +229,25 @@ func TestAuditAccountEpochAdvancesOnlyForADifferentCommander(t *testing.T) {
 		t.Fatalf("epoch = %d, want 3", a.current())
 	}
 }
+
+// The main gameplay display must still learn that a per-launch commander
+// choice is pending (to send the user to the launcher) without the launcher's
+// account RPC, which carries cards, portraits and settings. Found by the G2N
+// browser gate on 49258d0.
+func TestAuditGameplayDisplaySeesAccountChoiceGate(t *testing.T) {
+	s := twoCommanderServer(t) // multi mode, selection made by the host but not confirmed for this launch
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	main := dialScoped(t, s, "")
+	r := rpcWithMessage(t, ctx, main, "getGoAccountGate", map[string]any{})
+	if len(r["error"]) != 0 {
+		t.Fatalf("account gate unavailable to the main display: %s", r["error"])
+	}
+	var gate map[string]any
+	if err := json.Unmarshal(r["message"], &gate); err != nil || len(gate) != 1 {
+		t.Fatalf("account gate must carry only choiceRequired: %s", r["message"])
+	}
+	if want := s.accountChoiceRequired(); gate["choiceRequired"] != want {
+		t.Fatalf("choiceRequired = %v, want %v", gate["choiceRequired"], want)
+	}
+}

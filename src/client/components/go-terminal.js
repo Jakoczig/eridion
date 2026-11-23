@@ -18,7 +18,7 @@ import { Icon, Badge, Clock, show } from './go-terminal-widgets'
 export default function GoTerminal (props) {
   useEffect(() => { if (typeof document !== 'undefined') document.title = 'ERIDION · ERID' }, [])
   const [galaxyInspection, setGalaxyInspection] = useState(null)
-  useEffect(() => { let active = true; if (props.role === 'owner' && props.stage === 'G2E' && props.connected && props.ready) props.sendEvent('getGoAccounts').then(v => { if (active && v.choiceRequired) window.location.replace('/launcher') }).catch(() => {}); return () => { active = false } }, [props.role, props.stage, props.connected, props.ready, props.sendEvent])
+  useEffect(() => { let active = true; if (props.role === 'owner' && props.stage === 'G2E' && props.connected && props.ready) props.sendEvent('getGoAccountGate').then(v => { if (active && v.choiceRequired) window.location.replace('/launcher') }).catch(() => {}); return () => { active = false } }, [props.role, props.stage, props.connected, props.ready, props.sendEvent])
   const [display, setDisplay] = useState({ visible: false })
   const { value: flight } = useGoProjection({ ...props, connected: props.connected && props.stage === 'G2E' }, 'getGoNavigationContext', 'goNavigationContextChanged')
   const { value: plotted } = useGoProjection({ ...props, connected: props.connected && props.stage === 'G2E' }, 'getGoNavigation', 'goNavigationChanged')
