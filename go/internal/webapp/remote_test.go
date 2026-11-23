@@ -60,6 +60,7 @@ func ownerAction(t *testing.T, s *Server, client *http.Client, value any) map[st
 	raw, _ := json.Marshal(value)
 	req, _ := http.NewRequest("POST", s.URL()+"/owner/remote", strings.NewReader(string(raw)))
 	req.Header.Set("Origin", s.URL())
+	req.Header.Set("X-Eridion-Scope", "launcher")
 	res, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -110,6 +111,8 @@ func remotePost(t *testing.T, client *http.Client, endpoint, origin string, body
 	if origin != "" {
 		req.Header.Set("Origin", origin)
 	}
+	// Owner management endpoints accept only the launcher window's requests.
+	req.Header.Set("X-Eridion-Scope", "launcher")
 	res, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)

@@ -43,7 +43,7 @@ type Model struct {
 
 func NewModel() *Model { m := &Model{}; m.ResetSource(); return m }
 func blank() View {
-	return View{Evidence: "unknown", Ship: shipstate.View{Evidence: "unknown"}, Modules: []Module{}, ModulesState: "unknown", Cargo: CargoView{State: "unknown", Items: []CargoItem{}}, Inventory: InventoryView{State: "unknown", Items: []InventoryItem{}}, Materials: MaterialView{State: "unknown", Items: []MaterialItem{}}, Status: StatusView{State: "unknown"}}
+	return View{Exosuit: blankExosuit(), Evidence: "unknown", Ship: shipstate.View{Evidence: "unknown"}, Modules: []Module{}, ModulesState: "unknown", Cargo: CargoView{State: "unknown", Items: []CargoItem{}}, Inventory: InventoryView{State: "unknown", Items: []InventoryItem{}}, Materials: MaterialView{State: "unknown", Items: []MaterialItem{}}, Status: StatusView{State: "unknown"}}
 }
 func (m *Model) ResetSource() {
 	m.states = map[string]*state{}
@@ -66,6 +66,15 @@ func (m *Model) get(key string) *state {
 	m.states[key] = s
 	m.order = append(m.order, key)
 	return s
+}
+
+// Status returns a detached Status view without cloning the full parity
+// view (modules, cargo, inventory and materials).
+func (m *Model) Status(key string) StatusView {
+	if s := m.states[key]; s != nil {
+		return cloneStatus(s.v.Status)
+	}
+	return blank().Status
 }
 func (m *Model) View(key string) View {
 	if s := m.states[key]; s != nil {
@@ -142,13 +151,18 @@ func (m *Model) ApplyEvent(key string, e journal.Event) {
 	m.active = key
 	s := m.get(key)
 	gap := s.file != "" && (e.Position.FileID != s.file || e.Position.Offset <= s.offset || (s.sequence != 0 && e.Position.Sequence != 0 && e.Position.Sequence != s.sequence+1))
+	// Known suit equipment is account-scoped history of this commander key;
+	// session resets keep it, as Shutdown keeps materials.
+	suits := s.v.Exosuit
 	if gap {
 		*s = state{v: blank()}
 		s.v.Evidence = "unverified"
+		s.v.Exosuit = suits
 	}
 	defer func() { s.file = e.Position.FileID; s.offset = e.Position.Offset; s.sequence = e.Position.Sequence }()
 	if e.Type == "LoadGame" || e.Type == "Fileheader" {
 		*s = state{v: blank(), session: e.Timestamp, barrier: e.Timestamp, verified: e.Type == "LoadGame" && key != "" && e.FID != "" && !e.Timestamp.IsZero()}
+		s.v.Exosuit = suits
 		m.cargoValid = false
 	}
 	if !s.verified {
@@ -165,6 +179,7 @@ func (m *Model) ApplyEvent(key string, e journal.Event) {
 		materials := s.v.Materials
 		*s = state{v: blank()}
 		s.v.Materials = materials
+		s.v.Exosuit = suits
 		s.v.Evidence = "waiting_game"
 		return
 	}
@@ -183,6 +198,9 @@ func (m *Model) ApplyEvent(key string, e journal.Event) {
 		s.id = ident(d["ShipID"])
 	}
 	if e.Type != "LoadGame" && (e.Timestamp.IsZero() || e.Timestamp.Before(s.session)) {
+		return
+	}
+	if applyExosuit(&s.v.Exosuit, e.Type, e.Timestamp, d) {
 		return
 	}
 	switch e.Type {

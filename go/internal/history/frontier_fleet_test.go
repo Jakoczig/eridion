@@ -7,7 +7,9 @@ import (
 	"time"
 )
 
-func TestFrontierFleetFillsMissingShipsWithoutOverwritingWitnessedState(t *testing.T) {
+// Under confirmed D0 a fresh Frontier name wins, while a witnessed transfer
+// keeps its unknown destination instead of an old CAPI location.
+func TestFrontierFleetFillsMissingShipsAndKeepsWitnessedTransfer(t *testing.T) {
 	s := operationFixture(t, `{"event":"Loadout","ShipID":1,"Ship":"asp","ShipName":"Witnessed name","HullValue":10,"ModulesValue":5,"Modules":[]}`, `{"event":"ShipyardTransfer","ShipID":1,"TransferPrice":100,"TransferTime":60}`)
 	now := time.Now()
 	x := ExternalFacts{Provider: "frontier", Entity: "commander", EntityID: "SYNTHETIC", FID: "SYNTHETIC", IdentityVerified: true, Fetched: now, Expires: now.Add(time.Minute), Fields: map[string]any{"ships": []any{map[string]any{"id": "1", "model": "cobra_mk_iii", "name": "Old CAPI name", "systemName": "Old system", "value": "1000"}, map[string]any{"id": "9007199254740993", "model": "asp", "name": "Supplemental ship", "systemName": "Last-known CAPI system", "value": "9007199254740995"}}}}
@@ -29,8 +31,8 @@ func TestFrontierFleetFillsMissingShipsWithoutOverwritingWitnessedState(t *testi
 		var d map[string]any
 		json.Unmarshal(r.Details, &d)
 		if r.Entity == "1" {
-			if r.State != "in_transit" || d["shipName"] != "Witnessed name" || d["system"] == "Old system" {
-				t.Fatal("CAPI overwrote witnessed ship/transfer")
+			if r.State != "in_transit" || d["shipName"] != "Old CAPI name" || d["system"] == "Old system" {
+				t.Fatal("fresh Frontier name or witnessed transfer lost", d)
 			}
 		} else {
 			if r.Entity != "9007199254740993" || r.At != "" || r.State != "capi_last_known" || d["Value"] != "9007199254740995" {

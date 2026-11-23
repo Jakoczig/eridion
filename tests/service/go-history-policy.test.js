@@ -28,7 +28,9 @@ test('After sale is explicitly a manual hold and source fetch time is not observ
   const owner = renderHistory('owner')
   assert.match(owner, /After sale[^<]*hold \+ manual review only/)
   assert.match(owner, /No automatic sale-triggered uploads/)
-  assert.match(owner, /newer source observation/)
+  // Confirmed D0 replaces the old journal-first rule.
+  assert.match(owner, /fresh Frontier first, then the journal, then Inara and all other providers equally/)
+  assert.match(owner, /Retrieval time is separate from the source observation time/)
   assert.match(owner, /Manual review cannot authorize unsupported delayed recipients/)
   assert.equal(renderHistory('viewer'), '')
 })

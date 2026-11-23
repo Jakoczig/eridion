@@ -14,6 +14,126 @@ type ProviderDisk struct {
 	Uploader      string                                `json:"uploader"`
 }
 
+// validateProviderDisk is the shared bounds contract for persisted provider
+// state, used by ordinary saves and by restore sanitization.
+func validateProviderDisk(disk ProviderDisk) error {
+	if len(disk.Providers) > 32 || len(disk.Ledger) > 4096 || len(disk.Accounts) > 64 {
+		return errors.New("Invalid provider state")
+	}
+	for account, providers := range disk.Accounts {
+		if len(account) != 64 || len(providers) > 32 {
+			return errors.New("Invalid account consent")
+		}
+		for id, cfg := range providers {
+			if len(id) > 32 || len(cfg) > 16384 || !json.Valid(cfg) {
+				return errors.New("Invalid account provider configuration")
+			}
+		}
+	}
+	return nil
+}
+
+// pausedConsent returns cfg with uploads disabled and the provider paused,
+// preserving every other field (read preference, categories, identity).
+func pausedConsent(cfg json.RawMessage) (json.RawMessage, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(cfg, &fields); err != nil || fields == nil {
+		return nil, errors.New("Invalid provider configuration in backup")
+	}
+	fields["upload"] = json.RawMessage("false")
+	fields["paused"] = json.RawMessage("true")
+	return json.Marshal(fields)
+}
+
+// pauseRestoredConsent runs inside the staged restore transaction. It
+// requires renewed consent for every account namespace, not only the active
+// rows: publication policies become Never, exceptions are removed, pending
+// candidates are held, and the active provider rows plus every account in
+// the provider ledger are paused with uploads disabled. Credentials stay in
+// their OS vault namespaces; dedupe/history counters are retained.
+func pauseRestoredConsent(tx *sql.Tx) error {
+	if _, err := tx.Exec(`UPDATE publication_policy SET mode='Never'; DELETE FROM publication_exceptions; UPDATE publication_candidates SET status='held',reason='Restored backup requires renewed consent' WHERE status IN ('eligible','queued');`); err != nil {
+		return err
+	}
+	rows, err := tx.Query("SELECT provider,config_json FROM provider_consent")
+	if err != nil {
+		return err
+	}
+	active := map[string]json.RawMessage{}
+	for rows.Next() {
+		var id string
+		var raw []byte
+		if err = rows.Scan(&id, &raw); err != nil {
+			rows.Close()
+			return err
+		}
+		active[id] = json.RawMessage(raw)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for id, cfg := range active {
+		paused, err := pausedConsent(cfg)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec("UPDATE provider_consent SET config_json=?,updated_at=? WHERE provider=?", string(paused), utc(), id); err != nil {
+			return err
+		}
+	}
+	var b []byte
+	var hash string
+	err = tx.QueryRow("SELECT value,content_hash FROM app_state WHERE key='provider-ledger'").Scan(&b, &hash)
+	if err == sql.ErrNoRows || len(b) == 0 {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if digest(b) != hash {
+		return errors.New("Provider ledger checksum mismatch")
+	}
+	// Decode the ledger generically so fields this version does not model
+	// survive; only account provider configurations are rewritten.
+	var ledger map[string]json.RawMessage
+	if err = json.Unmarshal(b, &ledger); err != nil {
+		return errors.New("Invalid provider ledger in backup")
+	}
+	var accounts map[string]map[string]json.RawMessage
+	if raw, ok := ledger["accounts"]; ok {
+		if err = json.Unmarshal(raw, &accounts); err != nil {
+			return errors.New("Invalid provider ledger in backup")
+		}
+	}
+	for _, providers := range accounts {
+		for id, cfg := range providers {
+			if providers[id], err = pausedConsent(cfg); err != nil {
+				return err
+			}
+		}
+	}
+	if accounts != nil {
+		if ledger["accounts"], err = json.Marshal(accounts); err != nil {
+			return err
+		}
+	}
+	out, err := json.Marshal(ledger)
+	if err != nil {
+		return err
+	}
+	var check ProviderDisk
+	if err = json.Unmarshal(out, &check); err != nil {
+		return errors.New("Invalid provider ledger in backup")
+	}
+	if err = validateProviderDisk(check); err != nil {
+		return err
+	}
+	_, err = tx.Exec("UPDATE app_state SET value=?,content_hash=?,updated_at=? WHERE key='provider-ledger'", out, digest(out), utc())
+	return err
+}
+
 func (s *Store) LoadProviderConsent(initial []byte) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -76,18 +196,11 @@ func (s *Store) saveConsentLocked(raw []byte) error {
 		return errors.New("Consent budget exceeded")
 	}
 	var disk ProviderDisk
-	if json.Unmarshal(raw, &disk) != nil || len(disk.Providers) > 32 || len(disk.Ledger) > 4096 || len(disk.Accounts) > 64 {
+	if json.Unmarshal(raw, &disk) != nil {
 		return errors.New("Invalid provider state")
 	}
-	for account, providers := range disk.Accounts {
-		if len(account) != 64 || len(providers) > 32 {
-			return errors.New("Invalid account consent")
-		}
-		for id, cfg := range providers {
-			if len(id) > 32 || len(cfg) > 16384 || !json.Valid(cfg) {
-				return errors.New("Invalid account provider configuration")
-			}
-		}
+	if err := validateProviderDisk(disk); err != nil {
+		return err
 	}
 	tx, err := s.writer.Begin()
 	if err != nil {

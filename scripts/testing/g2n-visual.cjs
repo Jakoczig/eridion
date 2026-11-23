@@ -11,12 +11,15 @@ async function main () {
   c.on(e => { if (e.method === 'Runtime.exceptionThrown') report.errors.push(e.params.exceptionDetails.exception?.description); if (e.method === 'Fetch.requestPaused') { const p = e.params; const ok = p.request.url.startsWith(origin + '/') || p.request.url.startsWith('data:'); if (!ok) report.externalRequests.push(p.request.url); c.call(ok ? 'Fetch.continueRequest' : 'Fetch.failRequest', ok ? { requestId: p.requestId } : { requestId: p.requestId, errorReason: 'BlockedByClient' }).catch(() => {}) } })
   await c.call('Fetch.enable', { patterns: [{ urlPattern: '*' }] })
   const navigate = async (url, text) => { await c.call('Page.navigate', { url: origin + url }); await waitFor(() => evaluate(`location.pathname===${JSON.stringify(url)}&&(${pageTextReady(text, true)})`)); await evaluate('document.fonts.ready.then(()=>true)'); report.pages.push(url) }
-  const rpc = (name, message = {}) => evaluate(`new Promise((resolve,reject)=>{const w=new WebSocket(location.origin.replace('http:','ws:'));const timer=setTimeout(()=>{w.close();reject(Error('fixture RPC timeout'))},5000);w.onopen=()=>w.send(JSON.stringify({requestId:'g2n',name:${JSON.stringify(name)},message:${JSON.stringify(message)}}));w.onmessage=e=>{const r=JSON.parse(e.data);if(r.requestId==='g2n'){clearTimeout(timer);w.close();r.error?reject(Error(r.error)):resolve(r.message)}};w.onerror=()=>{clearTimeout(timer);reject(Error('fixture socket failed'))}})`)
+  const rpc = (name, message = {}) => evaluate(`new Promise((resolve,reject)=>{const w=new WebSocket(location.origin.replace('http:','ws:')+'/?scope=launcher');const timer=setTimeout(()=>{w.close();reject(Error('fixture RPC timeout'))},5000);w.onopen=()=>w.send(JSON.stringify({requestId:'g2n',name:${JSON.stringify(name)},message:${JSON.stringify(message)}}));w.onmessage=e=>{const r=JSON.parse(e.data);if(r.requestId==='g2n'){clearTimeout(timer);w.close();r.error?reject(Error(r.error)):resolve(r.message)}};w.onerror=()=>{clearTimeout(timer);reject(Error('fixture socket failed'))}})`)
   const screenshot = async name => { const r = await c.call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }); await fs.writeFile(path.join(output, name + '.png'), Buffer.from(r.data, 'base64')) }
   try {
     host = await fixture('G2E', '', path.join(root, 'tests/testdata/g2l'), false, { frontier: true }); origin = host.url
     await c.call('Emulation.setDeviceMetricsOverride', { width: 1366, height: 768, deviceScaleFactor: 1, mobile: false })
     await navigate('/ship/status', 'SHIP')
+    // Providers stay blocked until a commander is resolved; this single-commander
+    // fixture adopts its default once the import finishes.
+    await waitFor(async () => (await rpc('getGoAccounts')).settings?.defaultFID === 'SYNTHETIC-G2B')
     await rpc('configureGoProvider', { id: 'frontier', config: { read: true } }); await rpc('readGoProvider', { id: 'frontier', kind: 'profile' })
     const before = JSON.stringify((await rpc('getGoOperations', { kind: 'goals' })).goalMembership)
     await new Promise(resolve => { const ready = data => { if (data.toString().includes('FRONTIER_TICKED')) { host.child.stdout.off('data', ready); resolve() } }; host.child.stdout.on('data', ready); host.child.stdin.write('frontier-tick\n') })

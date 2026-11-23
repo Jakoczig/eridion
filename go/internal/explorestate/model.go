@@ -72,6 +72,7 @@ type systemState struct {
 }
 type Model struct {
 	cached   *surveyCache
+	touched  bool // a system was accessed for mutation during ApplyEvent
 	sessions map[string]*contextState
 	order    []string
 	systems  map[systemKey]*systemState
@@ -101,6 +102,7 @@ func (m *Model) context(key string) *contextState {
 	return s
 }
 func (m *Model) system(key systemKey, name string) *systemState {
+	m.touched = true
 	s := m.systems[key]
 	for i, k := range m.lru {
 		if k == key {
@@ -119,9 +121,36 @@ func (m *Model) system(key systemKey, name string) *systemState {
 	m.lru = append(m.lru, key)
 	return s
 }
+
+// sessionFingerprint captures the session fields the survey view and its
+// evidence handling depend on. Position bookkeeping is excluded: it changes
+// on every event without changing what the view shows.
+type sessionFingerprint struct {
+	verified, arrived, pending, continuous bool
+	address, name                          string
+	activeOrganic                          *organismState
+}
+
+func fingerprint(s *contextState) sessionFingerprint {
+	return sessionFingerprint{s.verified, s.arrived, s.pending, s.continuous, s.address, s.name, s.activeOrganic}
+}
+
+// ApplyEvent keeps the cached survey view when an event changes neither the
+// session state nor any system: irrelevant continuous events reuse it, while
+// continuity breaks, new sessions, arrivals and survey evidence invalidate it.
 func (m *Model) ApplyEvent(key string, e journal.Event) {
-	m.cached = nil
+	sessions := len(m.order)
+	existing := m.sessions[key] != nil
 	s := m.context(key)
+	before := fingerprint(s)
+	m.touched = false
+	m.applyEvent(key, s, e)
+	if m.touched || !existing || len(m.order) != sessions || fingerprint(s) != before {
+		m.cached = nil
+	}
+}
+
+func (m *Model) applyEvent(key string, s *contextState, e journal.Event) {
 	// Only a new explicit session restores identity after unordered source data.
 	if e.Type == "LoadGame" || e.Type == "Fileheader" {
 		*s = contextState{verified: e.Type == "LoadGame" && key != "" && e.FID != "", continuous: true, seen: true, fileID: e.Position.FileID, offset: e.Position.Offset, sequence: e.Position.Sequence}

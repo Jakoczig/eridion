@@ -4,7 +4,7 @@ export async function remoteAction (action, values = {}) {
   const response = await window.fetch('/owner/remote', {
     method: 'POST',
     credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-Eridion-Scope': 'launcher' },
     body: JSON.stringify({ ...values, action })
   })
   if (!response.ok) throw new Error('Remote display operation failed. Check the address/port and private certificate storage; restart after a storage error.')

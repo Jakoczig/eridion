@@ -26,14 +26,21 @@ func (s *Server) socket(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Forbidden", 403)
 		return
 	}
-	s.serveSocket(w, r, socketPrincipal{role: "owner", url: s.url, valid: func() bool { return s.sessions.valid(token) }})
+	// Launcher management is bound to the connection the launcher window
+	// opens (scope=launcher); every other owner connection is a gameplay
+	// display with exactly the paired-display capability set.
+	scope := scopeGameplay
+	if r.URL.Query().Get("scope") == scopeLauncher {
+		scope = scopeLauncher
+	}
+	s.serveSocket(w, r, socketPrincipal{role: "owner", scope: scope, url: s.url, valid: func() bool { return s.sessions.valid(token) }})
 }
 
 type socketPrincipal struct {
-	role, url, deviceID, token string
-	valid                      func() bool
-	remote                     *remoteManager
-	epoch                      uint64
+	role, scope, url, deviceID, token string
+	valid                             func() bool
+	remote                            *remoteManager
+	epoch                             uint64
 }
 
 func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal socketPrincipal) {
@@ -66,7 +73,7 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 		_ = conn.CloseNow()
 		return
 	}
-	s.sockets[conn] = struct{}{}
+	s.sockets[conn] = principal.scope
 	s.socketMu.Unlock()
 	defer func() { _ = conn.CloseNow(); s.socketMu.Lock(); delete(s.sockets, conn); s.socketMu.Unlock() }()
 	conn.SetReadLimit(1 << 20)
@@ -99,6 +106,9 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 	var providerRequested atomic.Bool
 	var contextRequested atomic.Bool
 	var spatialRequested atomic.Bool
+	// communityBase is the consent revision (+1; 0 = never requested) this
+	// connection last observed; set when community data are served.
+	var communityBase atomic.Uint64
 	var navRequested, surveyRequested, navDelivered, surveyDelivered atomic.Bool
 	var shipRequested, shipDelivered atomic.Bool
 	var workspaceRequested, workspaceDelivered atomic.Bool
@@ -124,6 +134,32 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 	if send(map[string]any{"name": "loadingProgress", "message": s.loadingStatus()}) != nil {
 		return
 	}
+	// Account epoch: every connection learns the epoch it was opened under.
+	// A commander switch closes gameplay connections (see accountSwitched);
+	// the launcher connection stays open and is told the new epoch.
+	connEpoch, epochChanged := s.account.watch()
+	if send(map[string]any{"name": "accountEpoch", "message": map[string]any{"epoch": connEpoch}}) != nil {
+		return
+	}
+	go func() {
+		changed := epochChanged
+		for {
+			select {
+			case <-readCtx.Done():
+				return
+			case <-changed:
+				var epoch uint64
+				epoch, changed = s.account.watch()
+				if principal.scope != scopeLauncher {
+					conn.CloseNow()
+					return
+				}
+				if send(map[string]any{"name": "accountEpoch", "message": map[string]any{"epoch": epoch}}) != nil {
+					return
+				}
+			}
+		}
+	}()
 	if s.game != nil && s.g2e {
 		go func() {
 			ticker := time.NewTicker(time.Second)
@@ -141,6 +177,17 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 						if revision != spatialRevision {
 							spatialRevision = revision
 							if send(map[string]any{"name": "goSpatialChanged", "message": map[string]any{"revision": revision}}) != nil {
+								return
+							}
+						}
+					}
+					// Audit F8: an EDSM consent change made in the launcher
+					// reaches every open community consumer at once.
+					if base := communityBase.Load(); base != 0 && s.community != nil {
+						revision, enabled := s.community.Revision()
+						if revision+1 != base {
+							communityBase.Store(revision + 1)
+							if send(map[string]any{"name": "goCommunityChanged", "message": map[string]any{"enabled": enabled}}) != nil {
 								return
 							}
 						}
@@ -269,6 +316,7 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 			RequestID string          `json:"requestId"`
 			Name      string          `json:"name"`
 			Message   json.RawMessage `json:"message"`
+			Epoch     *uint64         `json:"epoch"`
 		}
 		if kind != websocket.MessageText || json.Unmarshal(data, &request) != nil || len(request.RequestID) > 128 || len(request.Name) > 128 {
 			if send(map[string]any{"error": "Invalid request"}) != nil {
@@ -277,15 +325,40 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 			continue
 		}
 		response := map[string]any{"requestId": request.RequestID, "name": request.Name}
+		// Reject anything issued under a previous commander: a gameplay
+		// connection opened before the switch is no longer valid at all, and
+		// a request stamped with an older epoch never runs.
+		epoch := s.account.current()
+		response["epoch"] = epoch
+		if (principal.scope != scopeLauncher && connEpoch != epoch) || (request.Epoch != nil && *request.Epoch != epoch && !epochExempt[request.Name]) {
+			response["error"] = staleEpochError
+			if send(response) != nil || principal.scope != scopeLauncher {
+				return
+			}
+			continue
+		}
 		navigationNonempty, surveyNonempty, shipNonempty, workspaceNonempty := false, false, false, false
+		// D1: one capability set for every trusted gameplay display; launcher
+		// management stays on the local launcher (see rpc_authority.go).
+		if !rpcAllowed(principal, request.Name) {
+			response["error"] = launcherOnlyError
+			if send(response) != nil {
+				return
+			}
+			continue
+		}
 		switch request.Name {
 		case "getLoadingStatus":
 			response["message"] = s.loadingStatus()
 		case "hostInfo":
 			response["message"] = map[string]any{"urls": []string{principal.url}}
+		case "getGoAccountGate":
+			// Gameplay displays only learn whether a launcher commander choice
+			// is pending; cards, portraits and settings stay on the launcher.
+			response["message"] = map[string]any{"choiceRequired": s.accountChoiceRequired()}
 		case "getGoShipName":
-			if principal.role != "owner" || s.game == nil {
-				response["error"] = "Local owner required"
+			if s.game == nil {
+				response["error"] = "Ship identity unavailable"
 			} else {
 				response["message"] = s.game.OwnerShipIdentity()
 			}
@@ -296,8 +369,8 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 				response["message"] = s.providers.Layers()
 			}
 		case "refreshGoCommunityGoals":
-			if principal.role != "owner" || s.providers == nil || s.game == nil {
-				response["error"] = "Local owner and consented Frontier connection required"
+			if s.providers == nil || s.game == nil {
+				response["error"] = "Consented Frontier connection required"
 			} else if _, err := s.providers.Read(readCtx, "frontier", "communitygoals", ""); err != nil {
 				response["error"] = err.Error()
 			} else if value, err := s.operationsRPC(readCtx, "getGoOperations", json.RawMessage(`{"kind":"goals","limit":30}`)); err != nil {
@@ -306,43 +379,31 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 				response["message"] = value
 			}
 		case "getGoOperations", "exportGoOperations", "backfillGoOperationsSource":
-			if principal.role != "owner" {
-				response["error"] = "Local owner required"
-				break
-			}
 			if value, err := s.operationsRPC(readCtx, request.Name, request.Message); err != nil {
 				response["error"] = err.Error()
 			} else {
 				response["message"] = value
 			}
 		case "getGoFieldView":
-			response["message"] = s.fieldView(principal.role == "owner")
+			response["message"] = s.fieldView(true)
 		case "getGoBioScan":
 			var req struct {
 				Body string `json:"body"`
 			}
 			if s.game == nil || strictDecode(request.Message, &req) != nil || len(req.Body) > 20 {
 				response["error"] = "Invalid BioScan body"
-			} else if v, e := s.game.FieldBio(req.Body, principal.role == "owner"); e != nil {
+			} else if v, e := s.game.FieldBio(req.Body, true); e != nil {
 				response["error"] = "BioScan unavailable"
 			} else {
 				response["message"] = v
 			}
 		case "getGoBuiltinModules", "setGoBuiltinModule", "importGoItinerary", "deleteGoItinerary", "getGoItinerary", "editGoItinerary", "copyGoItineraryNext", "exportGoItinerary", "getGoBGSTally", "exportGoBGSTally":
-			if principal.role != "owner" {
-				response["error"] = "Local owner required"
-				break
-			}
 			if v, e := s.fieldRPC(readCtx, request.Name, request.Message); e != nil {
 				response["error"] = e.Error()
 			} else {
 				response["message"] = v
 			}
 		case "getGoConstruction", "getGoSaleLinks", "confirmGoOrganicSale", "getGoNearest", "getGoSourceFacts", "getGoDataStatus", "queryGoHistory", "backupGoHistory", "exportGoHistory", "stageGoRestore", "rebuildGoHistory", "reimportGoSource", "getGoPublicationPolicy", "setGoPublicationPolicy", "setGoPublicationException":
-			if principal.role != "owner" {
-				response["error"] = "Local owner required"
-				break
-			}
 			value, err := s.historyRPC(readCtx, request.Name, request.Message)
 			if err != nil {
 				response["error"] = err.Error()
@@ -352,10 +413,6 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 		case "previewGoHistorical", "confirmGoHistorical", "getGoProviders", "configureGoProvider", "setGoProviderCredential", "disconnectGoProvider", "readGoProvider", "connectGoFrontier", "completeGoFrontierReturn", "setGoFrontierClient":
 			if request.Name == "getGoProviders" && principal.role == "owner" {
 				providerRequested.Store(true)
-			}
-			if principal.role != "owner" {
-				response["error"] = "Owner permission required"
-				break
 			}
 			if s.providers == nil {
 				response["error"] = "Providers unavailable"
@@ -379,10 +436,6 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 				response["error"] = "System lookup unavailable"
 				break
 			}
-			if request.Name == "lookupGoSystem" && principal.role != "owner" {
-				response["error"] = "Local owner required"
-				break
-			}
 			var q struct {
 				Name string `json:"name"`
 			}
@@ -395,22 +448,18 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 			if request.Name == "getGoSpatialView" {
 				spatialRequested.Store(true)
 			}
-			if value, err := s.spatialRPC(readCtx, request.Name, request.Message, principal.role == "owner"); err != nil {
+			if value, err := s.spatialRPC(readCtx, request.Name, request.Message, true); err != nil {
 				response["error"] = err.Error()
 			} else {
 				response["message"] = value
 			}
 		case "getGoAtlasView", "getGoAtlasStatus", "configureGoAtlas", "checkGoAtlas", "installGoAtlas", "rollbackGoAtlas", "clearGoAtlasDetails", "clearGoAtlas":
-			if value, err := s.atlasRPC(readCtx, request.Name, request.Message, principal.role == "owner"); err != nil {
+			if value, err := s.atlasRPC(readCtx, request.Name, request.Message, true); err != nil {
 				response["error"] = err.Error()
 			} else {
 				response["message"] = value
 			}
 		case "getGoAccounts", "setGoAccounts", "getGoCommanderOverview", "setGoAvatar", "chooseGoAvatar":
-			if principal.role != "owner" {
-				response["error"] = "Local owner required"
-				break
-			}
 			value, err := s.accountRPC(readCtx, request.Name, request.Message)
 			if err != nil {
 				response["error"] = err.Error()
@@ -418,8 +467,8 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 				response["message"] = value
 			}
 		case "getGoLauncher", "setGoCompanion", "desktopAction":
-			if principal.role != "owner" || s.companion == nil {
-				response["error"] = "Local owner required"
+			if s.companion == nil {
+				response["error"] = "Native launcher unavailable"
 				break
 			}
 			if request.Name == "setGoCompanion" {
@@ -458,12 +507,12 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 				s.launcherOnce.Do(func() { close(s.launcherReady) })
 			}
 		case "getGoCommunity", "refreshGoCommunity", "setGoCommunityEnabled":
+			if s.community != nil {
+				revision, _ := s.community.Revision()
+				communityBase.Store(revision + 1)
+			}
 			if s.community == nil || s.game == nil {
 				response["error"] = "Community enrichment unavailable"
-				break
-			}
-			if request.Name != "getGoCommunity" && principal.role != "owner" {
-				response["error"] = "Local owner required"
 				break
 			}
 			if request.Name == "setGoCommunityEnabled" {
@@ -486,6 +535,12 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 				response["message"] = s.community.Refresh(readCtx, name, address)
 			} else {
 				response["message"] = s.community.View(name, address)
+			}
+		case "getGoProviderGameplay":
+			if s.providers == nil {
+				response["message"] = []any{}
+			} else {
+				response["message"] = providerGameplay(s.providers.Status())
 			}
 		case "getGoEngineeredStatistics":
 			if !s.g2e || s.game == nil {
@@ -538,6 +593,18 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 			}
 		default:
 			response["error"] = "Not implemented in this offline preview"
+		}
+		if now := s.account.current(); now != epoch {
+			if epochExempt[request.Name] {
+				// The account chooser itself switched the commander: report
+				// the epoch its result belongs to.
+				response["epoch"] = now
+			} else {
+				// The commander changed while this request ran: never deliver
+				// a reply computed for (or across) the previous commander.
+				delete(response, "message")
+				response["error"] = staleEpochError
+			}
 		}
 		if send(response) != nil {
 			return

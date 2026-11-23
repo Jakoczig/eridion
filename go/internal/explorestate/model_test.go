@@ -184,3 +184,55 @@ func TestExplorationPublicPayloadHasByteBudget(t *testing.T) {
 		t.Fatal("unbounded public survey", len(raw), v.Truncated)
 	}
 }
+
+func TestPerfExplorationRelevanceKeepsCacheOnlyForIrrelevantContinuousEvents(t *testing.T) {
+	m := start(t)
+	apply(t, m, "A", scan)
+	const address = "9007199254740993"
+	if v := m.View("A", address); len(v.Bodies) != 1 {
+		t.Fatal("fixture body missing", v)
+	}
+	cached := m.cached
+	apply(t, m, "A", `{"event":"Music","MusicTrack":"Exploration"}`)
+	apply(t, m, "A", `{"event":"ReceiveText","From":"fixture","Message":"hello","Channel":"local"}`)
+	if m.cached != cached {
+		t.Fatal("irrelevant continuous events invalidated the survey cache")
+	}
+	// Survey evidence invalidates.
+	apply(t, m, "A", `{"event":"FSSDiscoveryScan","BodyCount":12,"Progress":0.5}`)
+	if m.cached != nil {
+		t.Fatal("survey evidence kept a stale cache")
+	}
+	if v := m.View("A", address); v.ReportedBodyCount == nil || *v.ReportedBodyCount != 12 {
+		t.Fatal("new evidence missing", v)
+	}
+	// A source discontinuity on an otherwise irrelevant event still breaks
+	// trusted context and must invalidate the cached view.
+	e, err := journal.ParseLine([]byte(`{"event":"Music","MusicTrack":"Combat"}`), journal.SourcePosition{FileID: "other-file", Offset: offset.Add(1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.ApplyEvent("A", e)
+	if m.cached != nil {
+		t.Fatal("discontinuity kept the cache")
+	}
+	if v := m.View("A", address); v.SurveyState != "unverified" || len(v.Bodies) != 0 {
+		t.Fatal("broken continuity still exposed trusted survey", v)
+	}
+	// Another commander's first event creates a session and invalidates too.
+	m.View("A", address)
+	apply(t, m, "B", `{"event":"Music","MusicTrack":"Exploration"}`)
+	if m.cached != nil {
+		t.Fatal("new session kept cache")
+	}
+	// Shutdown of a verified session changes what the view may show.
+	apply(t, m, "A", `{"event":"LoadGame","FID":"SYNTHETIC-A"}`)
+	apply(t, m, "A", `{"event":"Location","StarSystem":"Fixture Alpha","SystemAddress":9007199254740993}`)
+	if v := m.View("A", address); v.SurveyState == "unverified" {
+		t.Fatal("session not re-established", v)
+	}
+	apply(t, m, "A", `{"event":"Shutdown"}`)
+	if m.cached != nil {
+		t.Fatal("shutdown kept cache")
+	}
+}

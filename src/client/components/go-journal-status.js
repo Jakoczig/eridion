@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 export async function journalAction (action, values = {}) {
-  const response = await window.fetch('/owner/journal', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...values, action }) })
+  const response = await window.fetch('/owner/journal', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Eridion-Scope': 'launcher' }, body: JSON.stringify({ ...values, action }) })
   if (!response.ok) throw new Error('Journal directory change failed. Choose an existing readable absolute folder, or repair the private Go profile.')
   return response.json()
 }

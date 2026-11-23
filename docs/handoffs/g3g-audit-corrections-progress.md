@@ -1,0 +1,180 @@
+# G3G audit corrections — implementation progress ledger
+
+Statuses: `planned`, `implemented`, `targeted checks passed`, `final CI passed`, `owner acceptance pending`, `owner acceptance confirmed`.
+
+## Pins (verified 22 November 2026)
+
+| Item | Value |
+| --- | --- |
+| Native base | PR #28, `go/g3f-galaxy-viewport-slices`, `864c724057a7fe28d9d42f5985fa5e1828d3b030` (open draft) |
+| G3E parent | PR #27, `64ddd186f692e48b2e2c1f5a342be20de5d1ac12` (ancestor of G3F, verified) |
+| G3D ancestor | PR #26, `79a034d6a65f9d83272f7655f35ed68f70eeecdf` (ancestor of G3E, verified) |
+| Documentation publication (`ERIDION_PLAN_COMMIT`) | `ec89a14dfd52eca55b4653a73f561528d33c8eb6` on `main`. The owner supplied the handoff file without its link; the uploaded file is byte-identical to the copy at this commit, which is the only commit touching that path. |
+| Implementation branch | `go/g3g-audit-corrections`, worktree created from the native base commit |
+
+Open PR manifest at start: #1–#28 all open drafts; #26/#27/#28 heads match the pins above. No earlier PR was modified, retargeted or rebased.
+
+Only the six planning-packet files were restored from the documentation commit; root README, package and workflow files were not touched.
+
+## Execution environment and local verification limits
+
+- Go: the session image had only Go 1.24.7/1.25.1 and proxy.golang.org was unreachable. Go `1.26.10` was built from the official `golang/go` tag `go1.26.10` (bootstrap 1.25.1). Modules were fetched with `GOPROXY=direct` through a temporary modfile outside the repository (`golang.org/x/sys` replaced by its GitHub mirror at the same version). Repository `go.mod`/`go.sum` are unchanged.
+- Not locally testable: `internal/desktop` (GTK4/WebKitGTK headers absent) and `internal/frontend` (needs the real static export; a local placeholder export was used and excluded from git). Both are covered only by CI.
+- Node: the npm registry is unreachable, so dependencies could not be installed. Component/socket tests ran under a local-only shim (esbuild in place of Next's Babel, React/ReactDOM 19 in place of 17). With the shim, baseline G3F and this branch show the same 14 environment failures (legacy service modules with missing dependencies, and React 19 rendering differences); every new or changed test passes. Lints (`lint:security`, `lint:go-assets`), the static export and the authoritative Node run are CI-only.
+- Baseline at `864c724`: every locally runnable `go test ./internal/...` package passed.
+
+## Slice 1 of project Batch A
+
+| ID | Status | Commit | Evidence / notes |
+| --- | --- | --- | --- |
+| Task 0 | implemented | `632db6e` | Pins, ancestry and PR stack verified; packet committed |
+| Task 1 / F01 | targeted checks passed | `ab984bc` | `TestAuditChronology*`, `TestValidObservedAt`, migration repair and rollback tests. All four chronology regressions fail on `864c724` (credits 100, fuel 4, construction 0.25, rank replaced by Progress 55; equal-time order dependence) and pass here. Schema 7 adds `observed_key`, indexes and a transactional backfill. |
+| Task 2 / F02 | targeted checks passed | `814ab1e` | `TestAuditRestoreAllAccounts` (active A, B and a separately pinned account; two restarts) and provider-level `TestAuditRestoreAccountSwitchStaysPaused` (zero transport calls; renewing A does not renew B). Both fail on `864c724`. |
+| Task 12 / F15 | targeted checks passed | `827c620` | `TestAuditDefaultCommander` (default B with reader-active A, no transient A display frame, offline restart), migration/recovery cases, ambiguous first-run import, RPC pinning across restart, launcher component tests. Existing tests that assumed single mode follows the journal-active commander now select the commander under test explicitly. |
+| PERF-03 | targeted checks passed | `a7da00a` | `TestPerfSidecarVerifiedReuse`: zero envelope decodes across unchanged polls; same-size rewrite still detected. Reading and hashing still happen every poll. |
+| PERF-04 | targeted checks passed | `f40b9e1` | `TestPerfStationSingleDecodeAndSave`: one evidence save per authorized attempt (baseline: two); consent-off evidence retained; failed persistence queues nothing. |
+| PERF-05 (phase A: Status getter, survey relevance) | targeted checks passed | `c2c7bb5` | Detached `Status` getter test; exploration cache kept for irrelevant continuous events, invalidated by discontinuity/new session/arrival/shutdown/evidence. |
+| EffectiveFacts bound | targeted checks passed | `f67f772` | Follow-up to Task 1: only existing field/source groups are queried. |
+| PERF-01 | targeted checks passed | `01ef87f` | One `JSON.parse` per incoming frame (baseline: two); zero profiler parses while disabled. |
+| PERF-02 (phase A: activity identity) | targeted checks passed | `01ef87f` | Socket state identity kept when the activity flag is unchanged. |
+
+### CI history for draft PR #29
+
+| Head | Legacy CI | Native Linux | Native Windows | Outcome |
+| --- | --- | --- | --- | --- |
+| `8c7d17b` | pass (5/5) | fail: `TestGameStateTwoFIDSessionsDoNotMix` raced the initial import (test adapted in this branch) | fail: G2P launcher visual, the new default card pushed actions below 680x580 | Fixed in `f1d9946` |
+| `f1d9946` | pass | pass (all steps) | fail: G2Q "Current-system markers missing" on attempt 1 and on a rerun of the failed job | Investigated in `f67f772` |
+| `f67f772` | pass | fail: pre-existing flake `TestG2MCStartupSurvivesRestartAndUpgradesLegacyCache` | pass (all steps, including G2Q) | See below |
+
+The G2Q failure did not recur after `EffectiveFacts` was bounded to existing field/source groups. Before that change it made up to ~150 indexed lookups per call under the game-state mutex, which is the most plausible cause of the slower Windows runner missing the navigation context. Correlation, not proof. The G2Q failure message now carries diagnostics if it recurs.
+
+`TestG2MCStartupSurvivesRestartAndUpgradesLegacyCache` is intermittent on the untouched baseline: 5 of 60 `-race` runs failed locally at `864c724`, and 2–4 of 60 on this branch. In failing runs the summary is stable and import-complete while the rebuilt workspace lacks startup snapshots, so this is a pre-existing defect in the legacy-cache upgrade path, not a timing-only test issue. Attempted mitigations did not change the rate and were not kept. It needs its own investigation.
+
+### Open items carried from slice 1
+
+- **Task 12 (resolved in slice 2, `2208fed`):** while no default is resolved (several cached commanders, or an unreadable preference file), the provider namespace stayed unpinned and followed the journal-active commander. The plan asks for provider activity to stay blocked until the launcher choice; that needs an explicit blocked state in the provider manager (a sentinel pin would create a stray account namespace). Remote account binding across a host-authorized switch for paired sessions is unchanged and belongs with Task 13.
+- **Task 12:** when `g2e` persistence is disabled, the game service has no profile directory while providers still read the preference file (pre-existing asymmetry, unchanged).
+- **Task 1:** the Commander component still shows Frontier-labelled ranks from `facts.ranks`; rank/progress presentation and cross-source authority follow in Task 5. `EffectiveFacts` now makes a small bounded set of indexed lookups per call (fields × sources) instead of one grouped query.
+- **Pre-existing flake (resolved in slice 2, `dbe3de1`):** `TestG2MCStartupSurvivesRestartAndUpgradesLegacyCache` (see CI history).
+- **Review:** this slice had a self-review of the full diff against the plan and the account/privacy boundaries. The independent whole-branch review in Task 24 is still pending.
+
+Remaining Batch A scope after slice 1 was Tasks 3–8, 13–19, immediate parts of 9–11 and 23, and the whole-app performance baseline; slice 2 below covers Tasks 5, 13, 14, 15, 16 (identity part) and the baseline.
+
+## Slice 2 of project Batch A
+
+Environment for this slice: Windows 11 Pro 10.0.26300, AMD Ryzen 7 6800U (8 cores / 16 threads), 28.7 GB RAM, NVMe SSD, WebView2 157.0.4341.60. Toolchain installed for this session: Go 1.26.10 (official zip, SHA-256 verified), Node 24.22.1 (official zip, SHA-256 verified), WinLibs GCC 16.2.0 UCRT (CGO). The clone uses `core.autocrlf=false` so `gofmt`/`standard` match CI. Unlike slice 1, every package (including `internal/desktop` and `internal/frontend` with the real static export) and the authoritative Node suite ran locally.
+
+Local baseline at `6bc4a3c` before any change: `npm ci`, `lint:security`, `lint:go-assets`, `go vet ./...` and `go test ./...` (all 23 packages) passed.
+
+| ID | Status | Commit | Evidence / notes |
+| --- | --- | --- | --- |
+| Task 5 / F06 | targeted checks passed | `733440c` | `history/source_priority.go`: shared `ResolveEvidence` (tier → eligibility → in-tier newest observation, latest fetch, later stored reference; no provider-name preference), `ResolveRanks` (per category; journal progress only for the same level and not older than that level), `ResolveCurrentShip` (fresh CAPI current ship only). `EffectiveFacts` lost its explicit journal override; facts carry `authority`/`eligible`. Commander overview renders resolved ranks and ship/system identity; `goalCards` prefers fresh Frontier totals and a verified personal Frontier contribution, never global-only participation. `TestAuditSourcePriority` (fresh 100 beats journal 200 with unknown observedAt; valid zero; expired/future fall back; journal beats fresh Inara; other FID ignored), `TestAuditSourcePriorityEqualTier`, `TestAuditRankCoherence` (Frontier 8 + journal 5/55 → 8 with unknown progress), `TestAuditCurrentShipAuthority`; store/rank cases fail on `6bc4a3c`. Component test `tests/service/source-authority.test.js`. Legacy journal-first expectations updated to D0. *Correction (audit F1):* until `a8c5c50`, journal ranks from real journals (Rank/Progress before LoadGame, reaching the page only through the live reducer) lost to Inara and to expired Frontier levels, so "journal values return after expiry" was not true for ranks. Fixed in `a8c5c50`. |
+| (memento drift) | targeted checks passed | `2839be7` | PERF-05 (`c2c7bb5`) changed explorestate state without rerunning `scripts/build/generate-go-persistence.go`; regenerated memento bumps `CacheFormat` so old caches rebuild from the journal. |
+| Task 14 / F17 | targeted checks passed | `bedee89` | `catalog.VehicleKind` (suit/SRV/fighter/taxi; unknown symbols stay ships). `shipstate` keeps a per-commander memento of the last verified real ship: a suit/vehicle `LoadGame` shows it as last-known (or unknown) and sets `controlled`; vehicle fuel is never ship fuel; non-ship Loadouts and fleet rows ignored. `paritystate` reduces Odyssey suit/loadout events into account-scoped equipment that survives shutdown/gaps/new sessions (grade only from explicit `Class`); Status parses on-foot Health/Oxygen/Temperature/Gravity/weapon before the main-ship guard. `WorkspaceView.Exosuit` via the existing workspace path; live telemetry only from the final known, current-account Status. New `/cmdr/exosuit` tab. Tests: `TestVehicleKind`, `TestAuditSuitIsNotShip`, `TestAuditExosuitKnownEquipment`, `TestAuditOnFootTelemetry`, `tests/service/exosuit.test.js`. |
+| Task 15 / F18 | targeted checks passed | `639b734` | `history.ResolvedFleet`: journal ∪ Frontier under D0; fresh Frontier wins reported fields and can re-own a sold/reused ID (sale kept in history); a fresh complete collection marks absent ships `not_currently_reported` (no sale); stale Frontier only fills gaps; witnessed transfers keep their unknown destination; coverage complete/partial/unknown; revision. Fleet page = bounded global search + offset paging bound to the revision (restart on change); `ReconciledFleetCount` = same owned total. Tests: `TestAuditFleetUnion`, `TestAuditFleetFrontierFallbacks`, `TestAuditFleetSearchAndPaging` (0/1/30/31/75, later-page search, revision restart), `tests/service/fleet-completeness.test.js`. |
+| Task 16 / F19 (identity part) | targeted checks passed | `bedee89` | A Loadout omitting `ShipName` keeps the same ship's name; explicit empty clears; other ships never inherit. One resolver (`shipIdentityLocked`: fresh Frontier current ship → journal view → durable witnessed rename) used by Commander, account cards and the statistics header. `TestAuditShipNamePreserved`, `TestAuditShipIdentityEverywhere`. |
+| Task 13 / F16 | targeted checks passed | `6cd542d` | `webapp/rpc_authority.go`: every dispatched RPC is gameplay (main and paired displays) or launcher management (local launcher only), enforced by one gate. New `getGoProviderGameplay` DTO (id, state, derived `readReady`, selected-commander/public-goal snapshot; no config, credentials, queues, errors). Gameplay components render identically for both roles; terminal has no settings gear/sidebar; launcher gained an Advanced category (data history, built-in modules, provider diagnostics). Automatic stale community refresh remains a main-display side effect (no per-display provider requests); explicit refresh is gameplay. Tests: `TestAuditGameplayParity`, `TestAuditRPCClassificationComplete`, `TestAuditGameplayProviderDTO`, `tests/service/gameplay-parity.test.js` (all 7 fail on the previous components). Legacy owner-only gameplay assertions rewritten; launcher-only, forged-session and foreign-account checks kept. |
+| Task 12 follow-up | targeted checks passed | `2208fed` | Explicit `blocked` provider state (no sentinel FID): `PinAccount("")` blocks activation, observation, uploads, station sidecars, reads, `ActivateAccount` and Frontier authorization; status `awaiting_commander`. Startup pins the persisted default/selection; single-commander adoption pins through `gamestate.Options.ProviderAccount`. `TestAuditProvidersBlockedWithoutCommander`, `TestAuditProviderBlockFollowsDefaultResolution`. |
+| Flake `TestG2MCStartupSurvivesRestartAndUpgradesLegacyCache` | targeted checks passed | `dbe3de1` | Root cause: restoring a cache that needs a startup rebuild installed the cached summary (`ImportInProgress=false`, `EventsRead=10`) and released the lock before `rebuildDerived` marked the import again; observers saw a "complete" import with empty startup projections. Fixed by reporting the rebuild as an import before releasing the lock. Deterministic regression via a nil-by-default hook in the former gap: `TestG2MCLegacyCacheRebuildNeverLooksComplete` fails without the fix. Locally the original flake did not reproduce (0/120 `-race` runs before the fix); 30 `-race` repetitions of both tests pass after it. |
+| Task 11 (baseline only) | measured (baseline) | see git log | See `docs/testing/g3g-native-performance.md`. No candidate comparison, no improvement claims. |
+
+| Task 5 follow-up (journal ranks) | superseded by `a8c5c50` | `f7d2f8e` | Startup Rank/Progress written before LoadGame never reach commander provenance, so resolved ranks were empty and the Commander page lost journal ranks (G2M-C browser gate). `MergeJournalRanks` adds the live reducer's journal ranks at the journal tier, keeps resolved levels and attaches progress only for the same level. `TestAuditMergeJournalRanks`. |
+| CI gate migration | targeted checks passed | `90a7d85` | CRLF-safe `TestAuditRPCClassificationComplete`; browser gates G2E/G2H/G2J/G2O open settings in the launcher, G2M-B checks `/missions/local-activity`, G2G/G2P expect the Advanced category, G2N waits for the adopted default before provider calls. All G2D–G3E browser gates except the CI-only baseline comparisons (G2K/G2L/G2M-A) pass locally. |
+
+### CI history for slice 2
+
+| Head | Legacy CI | Native Linux | Native Windows | Outcome |
+| --- | --- | --- | --- | --- |
+| `d3885e1` | [pass](https://github.com/Jakoczig/eridion/actions/runs/45080339797) | [fail](https://github.com/Jakoczig/eridion/actions/runs/45080339957): G2E browser gate clicked the removed terminal settings gear | fail: `TestAuditRPCClassificationComplete` could not parse the CRLF checkout of `socket.go` | Both caused by this slice; fixed in `f7d2f8e`/`90a7d85` after reproducing every runnable browser gate locally |
+| `90a7d85` | [pass](https://github.com/Jakoczig/eridion/actions/runs/45083157439) (5/5) | [pass](https://github.com/Jakoczig/eridion/actions/runs/45083157467) (all steps) | pass (all steps) | Green on first attempt; the final ledger-only head is verified in the PR description |
+
+### Open items and limitations after slice 2
+
+- **Task 13 / contract 4, owner decision 2026-11-23: displays follow host switches.** A host-authorized commander (launcher selection in multi mode, or the resolved default) moves every trusted grant bound to a verified commander to the new commander (`devices.go` `hostSelectAccount`), with no re-pairing or prompt. *Correction (audit F2):* at `2e93833` only **paired** sockets were closed on a switch; the main display's sockets stayed open and requests carried no account marker, so the earlier wording here ("no data or pending action from the previous commander survives") was not true. Since `e51ec0e`/`c04bd1c` every gameplay connection, main and paired, is closed and every request carries an account epoch (see "Audit corrections" below). Paired clients reconnect within 5 s through `/auth/session`. A grant stranded on another commander by an earlier build is moved by the next host selection. Not moved: grants of unknown ownership (ambiguous legacy grants stay quarantined) and the journal-active fallback used before a default is chosen (`gamestate` reports `authoritative=false`). Tests (shown failing first): `TestHostCommanderSwitchMovesTrustedDisplays`, `TestHostSelectionMigratesStrandedGrant`, `TestHostSwitchKeepsAmbiguousLegacyGrantQuarantined`, `TestLauncherSelectionMovesPairedDisplay` (end to end through `setGoAccounts`), `TestDisplayAccountReportsHostAuthority`.
+- Task 14: suit-event payload enrichment for historical rows with `{}` payloads, Frontier suit normalization and numeric suit shield/battery are not implemented. Exosuit equipment lives in the parity reducer (refinement of the planned separate `exosuitstate` package); it is delivered as `WorkspaceView.Exosuit`.
+- Task 16: catalogue refresh (38→49 hulls, module ID collision indexes), CAPI/journal module reconciliation and module-class/slot-capacity separation remain open (they depend on Task 23's manifest process).
+- Task 15: the owner's exact missing vessel IDs remain a real-account acceptance comparison.
+- Task 13: the launcher "Advanced" category reuses the existing components; paired displays still lack the Spansh/planner parity work of Task 20 and key actions of Task 21 (not part of this slice). Account-switch update of paired sessions: resolved above.
+- Tasks 3, 4, 6, 7, 8, 18, 19 were not started in this slice.
+- `g2e` disabled persistence asymmetry from slice 1 unchanged.
+
+## Measurements
+
+Slice 1 had no desktop environment; its PERF figures are operation counts from targeted tests. Slice 2 recorded the first native baseline on a Windows machine (three repetitions per case): see [`docs/testing/g3g-native-performance.md`](../testing/g3g-native-performance.md). Summary: 100k-event headless cold import 16.3 s wall / 19.6 s CPU (range 16.1–16.6 s); +1k incremental restart 0.84 s; live append to service summary p50 350 ms (dominated by the 500 ms reader poll); launcher idle with WebView2 children 5.2 % of one core, ~429 MB working set, < 4 MB growth over 5 min. No candidate comparison yet, so no improvement claims.
+
+## Audit corrections (slice 3, 23 November 2026)
+
+Input: [`docs/audits/G3G_Audit_2026-11-23.md`](../audits/G3G_Audit_2026-11-23.md), the audit of `2e93833` (report commit `43095ca`). Each fix began with a regression test that failed on the previous code; the ones that did are marked "red first".
+
+Environment for this slice: Linux x86_64, Go 1.26.10 (selected by the module's `toolchain` line), CGO with gcc and SQLite, Node 22.22.1 locally (the pinned 24.22.1 runs in CI). GTK4/WebKitGTK and a Chromium executable are not installed, so `internal/desktop`, `cmd/daedalus` and the browser/visual gates run only in CI.
+
+| Finding | Status | Commit | Change and evidence |
+| --- | --- | --- | --- |
+| F1 (Task 5) — journal ranks lost to Inara/expired Frontier | targeted checks passed | `a8c5c50` | `MergeJournalRanks` treats the live reducer's attributable ranks as journal-tier evidence: they replace third-party, ineligible Frontier and older journal levels; only eligible Frontier keeps precedence; replaced levels are kept as labelled `alternatives`. Red first: `TestAuditMergeJournalRanksFollowsAuthority`, `TestAuditJournalRanksBeforeLoadGameFollowAuthority` (Rank/Progress before LoadGame, then Inara, expired Frontier and fresh Frontier). |
+| F2 (Task 13) — main display survived a commander switch; no request epoch | targeted checks passed | `e51ec0e`, `c04bd1c` | Host account epoch (`webapp/account_epoch.go`): advances when a different known commander becomes the displayed one, closes every gameplay connection (main and paired) and signals the launcher connection. Each connection is told its epoch; the client stamps every request and rejects replies from another epoch; the host rejects stale-epoch requests and any request on a gameplay connection opened under an older epoch, and drops a reply whose commander changed while it ran. Red first: `TestAuditCommanderSwitchInvalidatesMainDisplay` (main socket closed; queued import with the old epoch rejected and absent from the new commander), `TestAuditAccountEpochAdvancesOnlyForADifferentCommander`, client tests in `native-performance.test.js`. `c04bd1c` also stops the momentary empty commander at a session boundary (Fileheader, LoadGame, rebuild) from counting as a switch; at `e51ec0e` that would have closed gameplay sockets mid-import. |
+| F5 (Task 13) — launcher-only enforced by role only | targeted checks passed | `e51ec0e` | Launcher RPCs need the owner session **and** the launcher connection (`scope=launcher`, opened only by the launcher page); the main gameplay display has exactly the paired capability set. Owner pairing/journal HTTP endpoints need the `X-Eridion-Scope: launcher` header. Red first: `TestAuditMainDisplayCannotCallLauncherRPCs`, `TestAuditOwnerHTTPNeedsLauncherScope`. Browser-gate fixture helpers that call launcher RPCs act as the host and use the launcher scope. Limit: the scope is declared by the page that opens the connection; all same-origin pages run the same trusted local bundle, so this is a per-connection boundary, not a cryptographic per-window one. |
+| F7 (Task 13) — parity tests checked permissions only | targeted checks passed | `b8d1e45` | `TestAuditGameplayDisplaysReceiveIdenticalData`: identical normalized replies for every gameplay read on main and paired displays (only `hostInfo` excluded), real data required for the core reads, same itinerary-import outcome. Not red first (behaviour already held at `2e93833`); verified by an injected viewer-only difference, which it caught. |
+| F3 (Task 14) — suit events stored as `{}` | targeted checks passed | `91c6d8e`, `49258d0` | History retains the payloads of exactly the events the Exosuit reducer consumes (`paritystate.ExosuitEventTypes`). No schema change, no migration. Red first: `TestAuditExosuitSurvivesHistoryRebuild` (rebuild from history with the journal file removed). `49258d0` makes the test remove the journal only after the service stops (Windows file lock). Open: rows already stored as `{}` by earlier builds are not enriched. |
+| F4 (Task 12) — unverified default never recovered | targeted checks passed | `f88dcb6` | After the catch-up import, a stored default or migrated legacy selection naming no verified commander sets `DefaultRequired`, explains it in `AccountRecovery`, blocks providers and is never replaced automatically. Red first: `TestAuditUnverifiedDefaultRequiresLauncherChoice`. |
+| F6 (Task 12) — default adopted from cache before catch-up | targeted checks passed | `f88dcb6` | Adoption runs only when the catch-up import completes. Red first: `TestAuditDefaultAdoptedOnlyAfterCatchUp`. |
+| F9 — ledger accuracy | done | this commit | Task 5 and Task 13 claims corrected above; CI history below. |
+| F5 follow-up — gameplay account gate | targeted checks passed | `b81f2e7` | Red first: `TestAuditGameplayDisplaySeesAccountChoiceGate`, client test "terminal asks only the gameplay account gate". No other gameplay component calls a launcher RPC. |
+| F10 — performance-doc caveats | done | this commit | Baseline commit, Windows-only scope and working-set growth reference stated in `docs/testing/g3g-native-performance.md`. |
+| F8 — G2E live-invalidation gate | open | — | Needs a second browser page kept on the map while the launcher disables EDSM; not attempted without a local browser. |
+
+### CI history for slice 3
+
+| Head | Legacy CI | Native desktop | Outcome |
+| --- | --- | --- | --- |
+| `07e37ff` | [pass](https://github.com/Jakoczig/eridion/actions/runs/45084654370) | [pass](https://github.com/Jakoczig/eridion/actions/runs/45084654262) | Ledger-only head of slice 2 |
+| `2e93833` | [pass](https://github.com/Jakoczig/eridion/actions/runs/45114040236) | [pass](https://github.com/Jakoczig/eridion/actions/runs/45114040164) | Audited head |
+| `e51ec0e` | [pass](https://github.com/Jakoczig/eridion/actions/runs/45214622101) | [fail](https://github.com/Jakoczig/eridion/actions/runs/45214622150): Go tests, Linux and Windows | `TestNativeOfflineSmokeIgnoresJournalDirectory` got 403: its owner-journal request lacked the new launcher scope header. Fixed in `c04bd1c` (which also tightened the epoch rule, see F2) |
+| `c04bd1c` | [pass](https://github.com/Jakoczig/eridion/actions/runs/45218269949) | [fail](https://github.com/Jakoczig/eridion/actions/runs/45218269498): Go tests, Windows only | `TestAuditProviderBlockFollowsDefaultResolution` (slice 2), `TestAuditJournalRanksBeforeLoadGameFollowAuthority` and the `twoCommanderServer` fixture timed out after 3 s with fresh profiles still opening the database (`RESTORING_CACHE`, 0 events). Linux passed. Did not recur on `49258d0` or later; recorded as Windows runner I/O timing, not fixed by a code change. `49258d0` also made the Exosuit test remove the journal only after the service stops (a real Windows file-lock hazard, though not the cause here). |
+| `49258d0` | [pass](https://github.com/Jakoczig/eridion/actions/runs/45219758489) | [fail](https://github.com/Jakoczig/eridion/actions/runs/45219758886): G2N browser gate, Linux and Windows (Go tests passed on both) | The main display read `choiceRequired` through the launcher-only `getGoAccounts`, so it no longer redirected to the launcher's commander choice. Fixed in `b81f2e7` with the bounded gameplay RPC `getGoAccountGate`. Later gates did not run in this attempt. |
+| `b81f2e7` | [pass](https://github.com/Jakoczig/eridion/actions/runs/45225527902) | [pass](https://github.com/Jakoczig/eridion/actions/runs/45225527888) (Linux and Windows, every step including all browser and visual gates) | Final code head of slice 3 |
+
+### Local verification for slice 3
+
+On `c04bd1c` (Linux, Go 1.26.10, Node 22.22.1): `npm ci`, `lint:security`, `lint:go-assets`, `npm test` (201/201), `test:go-assets` (29/29), `build:go-assets`, `gofmt -l` (clean), `go vet` and `go test` on every package except `internal/desktop` and `cmd/daedalus` (GTK4/WebKitGTK absent locally; both pass in CI), and `-race` on `history`, `gamestate`, `paritystate` and `webapp`: all passed. After the later fixes: `npm test` 202/202, `go test ./internal/webapp`, `go test -race ./internal/gamestate` passed; the `-race` rerun of `webapp` on `b81f2e7` was stopped before finishing. Browser and visual gates ran only in CI (no local Chromium).
+
+### Open after slice 3
+
+- F8: the G2E gate still checks EDSM disable after a fresh map mount, not live invalidation of an open map.
+- Task 14: suit rows stored as `{}` by earlier builds are not enriched from the original journals; Frontier suit normalization; multicrew and live-claim removal tests.
+- Tasks 15/16 test and catalogue gaps listed in the audit; Tasks 3, 4, 6–10, 17–24 not started; PERF-06–10 not started.
+- Owner acceptance of slices 1–3 is pending; no status here is "owner acceptance confirmed".
+
+## Navigation correctness (slice 4, 23 November 2026)
+
+Directive: resolve the G2Q Windows failure, then Task 3, Task 4 and the G2E coverage gap (audit F8). Each change began with a regression that failed on the previous code. Browser gates ran locally this time (Chromium 131 headless; this host has no usable Chromium sandbox, so the local launcher adds `--no-sandbox`; CI keeps the sandboxed launch). Toolchain: Go 1.26.10, Node 22.22.1 locally.
+
+| ID | Status | Commit | Change and evidence |
+| --- | --- | --- | --- |
+| G2Q Windows failure (run 45229400143) | targeted checks passed | `998b294` | Cause: the current-system marker needs the navigation context, a separate asynchronous reply; the gate counted markers right after the map text appeared. Reproduced exactly by delaying only navigation-context WebSocket frames by 3 s (same `markers:0` error with the host reporting Fixture Alpha). The application recovers once the reply arrives; the gate now waits (condition-polled, 15 s bound) for exactly three markers, then asserts three, with diagnostics. Verified at 1366×768 and 680×580@2: passes normally and with a 3 s delay; still fails when the context never arrives. |
+| Task 3 / F03 (cascade) | targeted checks passed | `936d514` | Legacy rules (`.go-terminal .go-galaxy.is-compact .go-galaxy-projections{display:block}` and two `.go-terminal .go-fsd` rules) out-ranked the unified grid. Measured during FSD charge at 1366×768 before the fix: `display:block`, X/Y below the viewport, Y/Z 6817 px tall. Legacy rules now apply only to `:not(.go-g3d)`. Red→green: `g3e-visual.cjs` geometry assertions. |
+| Task 3 / F04 (XYZ controls) | targeted checks passed | `936d514` | Controls follow the selected Local inspection, not data readiness; loading, unavailable/point-budget (backend notice) and request failure are shown separately; only a complete reply for the current slice renders; superseded replies ignored; camera math unchanged. Red→green: `g3e-map.test.js` "XYZ controls survive pending and over-budget Local data; stale slices never render" (0 controls while pending before). |
+| Task 3 — View System during FSD | targeted checks passed | `936d514` | View System inside the overlay dismisses the episode through the manual-dismissal policy before navigating; verified in the browser (search inside FSD, then `/nav/map` with no overlay). |
+| Task 4 / F05 | targeted checks passed | `6574aae` | `community.Manager.Resolve(name, expectedAddress)` on the existing lookup path (consent, cache, cooldown, identity) refuses a different ID64; `systemView` fills only missing coordinates for the same address, labelled `coordinatesSource`/`coordinatesFetchedAt`; passive reads cache-only. Client: named hit without coordinates continues to the authorized lookup; results are bound to their query (edit, failure, superseded reply, reply after unmount); stale cached data labelled with date. Red→green: `TestAuditSearchResolveBindsIdentity`, `TestAuditSearchMissingCoordinates`, two `g3e-map.test.js` search tests. |
+| F8 — G2E live invalidation | targeted checks passed | `1a67d8f` | The open map kept community stations until its 15 s poll when EDSM was disabled from the launcher window. The host pushes `goCommunityChanged` (consent state only) from the socket's one-second loop to community consumers; `useCommunity` reloads. G2E opens the launcher as a second page and requires the open map to clear within 5 s (red on the previous build; 153 ms after). Red→green also: `TestAuditCommunityConsentChangeReachesOpenDisplays`. |
+
+FSD geometry measured by `g3e-visual.cjs` (X/Z, X/Y, Y/Z in CSS px; identical for charge and jump at each size):
+
+| Viewport | X/Z | X/Y | Y/Z |
+| --- | --- | --- | --- |
+| 1366×768 | 502.2 × 502.0 | 502.2 × 40.2 | 40.2 × 502.0 |
+| 1920×1080 | 791.1 × 790.8 | 791.1 × 63.3 | 63.3 × 790.8 |
+| 820×1180 | 440.7 × 440.7 | 440.7 × 35.2 | 35.2 × 440.7 |
+| 680×580 | 351.0 × 351.3 | 351.0 × 28.1 | 28.1 × 351.3 |
+
+The normal map passes the same grid/square/aligned checks at five sizes, Galaxy and Local rectangles are identical, an XYZ edit inside FSD keeps the rectangles, and FSD without a route keeps the grid. Screenshots and the geometry JSON are written to `temp/g3e-visual/` and uploaded by CI as the G3E artifact.
+
+Gate updates made for intended new behaviour (not weakened): G3D/G3E idle-request checks wait for the fitted slice's Local data rather than the axis text (now visible while loading); the visual fixture gained a `charge` command (synthetic Status with FSD charging); the shared harness exports its CDP client and debugging port.
+
+Local verification on `1a67d8f`: `npm test` 204/204, `lint:security`, `lint:go-assets`, `build:go-assets`, gofmt clean, `go vet` and `go test` on all packages except `internal/desktop`/`cmd/daedalus` (no GTK locally), `-race` on `community`, `navcontext`, `webapp`; browser gates G2E, G2G, G2H, G2Q, G3C, G3D and G3E passed locally. Final CI for this slice: see PR #29.
+
+Limitations and open items after slice 4:
+
+- Paired-display FSD behaviour is covered by the existing display-controller policy tests, not by a browser gate.
+- Task 3's local-only/density-only map policy combinations are exercised only partly (both-off and both-on in G3E).
+- Launcher-only authority remains a per-connection scope declared by the trusted local frontend, not cryptographic per-window authentication.
+- Main-display-only automatic community refresh is unchanged; explicit refresh and lookups are equal on main and paired displays.

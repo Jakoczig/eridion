@@ -3,7 +3,6 @@ package webapp
 import (
 	"context"
 	"encoding/json"
-	"github.com/Jakoczig/eridion/go/internal/privatefs"
 	"io"
 	"net/http"
 	"time"
@@ -59,15 +58,33 @@ func (s *Server) startGame(ctx context.Context, opts Options) {
 	if s.g2e {
 		persistentDir = opts.StorageDir
 	}
-	var accounts gamestate.AccountSettings
-	if raw, e := privatefs.Read(opts.StorageDir, "accounts-v1.json"); e == nil {
-		_ = json.Unmarshal(raw, &accounts)
+	// Pin the provider namespace to the configured commander before any
+	// journal event can activate another account. Without a resolved
+	// commander (first run with several identities, or a damaged preference)
+	// PinAccount("") leaves the provider manager explicitly blocked until the
+	// launcher choice or single-commander adoption pins one.
+	accounts, _ := gamestate.LoadAccountSettings(opts.StorageDir)
+	if s.providers != nil {
+		if accounts.Multiple {
+			s.providers.PinAccount(accounts.Selected)
+		} else {
+			s.providers.PinAccount(accounts.Default)
+		}
 	}
-	if accounts.Multiple && s.providers != nil {
-		s.providers.PinAccount(accounts.Selected)
-	}
-	s.game, _ = gamestate.NewService(gamestate.Options{DisplayAccount: func(fid string, verifiedSingle bool) {
-		if s.remote != nil {
+	s.game, _ = gamestate.NewService(gamestate.Options{ProviderAccount: func(fid string) {
+		if s.providers != nil {
+			s.providers.PinAccount(fid)
+		}
+	}, DisplayAccount: func(fid string, verifiedSingle, authoritative bool) {
+		// A changed commander invalidates every gameplay connection and every
+		// request issued under the previous commander.
+		s.accountSwitched(fid)
+		if s.remote == nil {
+			return
+		}
+		if authoritative {
+			s.remote.hostSelectAccount(fid, verifiedSingle)
+		} else {
 			s.remote.selectAccount(fid, verifiedSingle)
 		}
 	}, StorageDir: persistentDir, OnHistoryReady: func(db *history.Store, seed history.ProviderSeed) {
@@ -118,7 +135,7 @@ func (s *Server) prototype() map[string]any {
 	return marker
 }
 func (s *Server) ownerJournal(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" || !s.sameOrigin(r) || !s.sessions.valid(s.sessions.token(r)) {
+	if r.Method != "POST" || !s.sameOrigin(r) || !s.sessions.valid(s.sessions.token(r)) || !launcherHTTP(r.Header.Get("X-Eridion-Scope")) {
 		http.Error(w, "Forbidden", 403)
 		return
 	}

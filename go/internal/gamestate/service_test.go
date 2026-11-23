@@ -59,15 +59,34 @@ func TestGameStateTwoFIDSessionsDoNotMix(t *testing.T) {
 	appendEvent(t, dir, `{"event":"LoadGame","FID":"SYNTHETIC-A"}`)
 	appendEvent(t, dir, `{"event":"Location","StarSystem":"Fixture A","SystemAddress":9223372036854775807}`)
 	s := startService(t, dir)
-	waitState(t, s, func(v Summary) bool { return v.CurrentSystem == "Fixture A" })
+	waitState(t, s, func(v Summary) bool { return v.CurrentSystem == "Fixture A" && !v.ImportInProgress })
+	// A is the sole commander when the initial import completes and becomes
+	// the default; the display stays on A while B's separate session is
+	// ingested. (Had B appeared during the import, both would be ambiguous
+	// and the launcher would ask once instead.)
+	if d := s.Accounts().Default; d != "SYNTHETIC-A" {
+		t.Fatalf("sole imported commander not adopted: %q", d)
+	}
 	appendEvent(t, dir, `{"event":"LoadGame","FID":"SYNTHETIC-B"}`)
-	waitState(t, s, func(v Summary) bool { return v.EventsRead == 3 && v.CurrentSystem == "" })
+	waitState(t, s, func(v Summary) bool { return v.EventsRead == 3 && v.CurrentSystem == "Fixture A" })
 	appendEvent(t, dir, `{"event":"Location","StarSystem":"Fixture B"}`)
-	waitState(t, s, func(v Summary) bool { return v.CurrentSystem == "Fixture B" })
+	waitState(t, s, func(v Summary) bool { return v.EventsRead == 4 && v.CurrentSystem == "Fixture A" })
+	s.mu.Lock()
+	b := s.commanders["SYNTHETIC-B"].system
+	s.mu.Unlock()
+	if b != "Fixture B" {
+		t.Fatalf("B session state = %q", b)
+	}
 	appendEvent(t, dir, `{"event":"LoadGame","FID":"SYNTHETIC-A"}`)
-	waitState(t, s, func(v Summary) bool { return v.CurrentSystem == "Fixture A" })
+	waitState(t, s, func(v Summary) bool { return v.EventsRead == 5 && v.CurrentSystem == "Fixture A" })
 	appendEvent(t, dir, `{"event":"LoadGame"}`)
-	waitState(t, s, func(v Summary) bool { return v.EventsRead == 6 && v.CurrentSystem == "" })
+	waitState(t, s, func(v Summary) bool { return v.EventsRead == 6 && v.CurrentSystem == "Fixture A" })
+	s.mu.Lock()
+	active := s.active
+	s.mu.Unlock()
+	if active != "" {
+		t.Fatal("unidentified session inherited a commander", active)
+	}
 	raw, _ := json.Marshal(s.Snapshot())
 	if strings.Contains(string(raw), "SYNTHETIC") || strings.Contains(string(raw), dir) || strings.Contains(string(raw), "FID") {
 		t.Fatal("private state escaped summary")

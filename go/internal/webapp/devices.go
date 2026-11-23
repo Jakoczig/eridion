@@ -201,20 +201,52 @@ func (m *remoteManager) pairLocked(code, name string) (string, error) {
 	return token, nil
 }
 
-// Called before selected-account projections are published. Existing grants
-// remain stored for their original profile; switching cannot expand a grant.
+// Called before selected-account projections are published while no default
+// commander is resolved (journal-active fallback). Existing grants remain
+// stored for their original commander; a fallback switch cannot move a grant.
 func (m *remoteManager) selectAccount(fid string, verifiedSingle ...bool) {
+	m.switchAccount(fid, len(verifiedSingle) == 1 && verifiedSingle[0], false)
+}
+
+// hostSelectAccount applies a host-authorized commander (launcher selection
+// or resolved default). Every trusted display follows it without re-pairing:
+// grants bound to any verified commander move to the new one, while open
+// sockets are still closed so nothing delivered or requested under the old
+// commander survives. Grants of unknown ownership stay quarantined.
+func (m *remoteManager) hostSelectAccount(fid string, verifiedSingle bool) {
+	m.switchAccount(fid, verifiedSingle, true)
+}
+
+func (m *remoteManager) switchAccount(fid string, verified, host bool) {
 	if fid == "" {
 		return
 	}
 	scope := tokenHash(fid)
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.fault || m.closed || m.state.Account == scope {
+	if m.fault || m.closed {
+		return
+	}
+	moved := false
+	if host {
+		for i := range m.state.Devices {
+			if a := m.state.Devices[i].Account; a != "" && a != scope {
+				m.state.Devices[i].Account = scope
+				moved = true
+			}
+		}
+	}
+	if m.state.Account == scope {
+		// Same commander: only a stranded grant can need persisting.
+		if moved {
+			if e := m.saveLocked(); e != nil {
+				m.failLocked()
+			}
+		}
 		return
 	}
 	initialBinding := m.state.Account == ""
-	legacySafe := !m.legacyGrants || (len(verifiedSingle) == 1 && verifiedSingle[0])
+	legacySafe := !m.legacyGrants || verified
 	if initialBinding && legacySafe {
 		for i := range m.state.Devices {
 			if m.state.Devices[i].Account == "" {

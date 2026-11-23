@@ -30,24 +30,23 @@ export default function GoOperations (props) {
   const [kind, setKind] = useState(initial)
   const [commodity, setCommodity] = useState(''); const [market, setMarket] = useState(''); const [otherMarket, setOtherMarket] = useState(''); const [id, setID] = useState(''); const [before, setBefore] = useState('')
   const [page, setPage] = useState(null); const [notice, setNotice] = useState(''); const [revision, setRevision] = useState(0); const [ack, setAck] = useState(false); const [preview, setPreview] = useState(null)
-  const [fleetState, setFleetState] = useState('owned'); const [fleetAfter, setFleetAfter] = useState(0)
-  const query = JSON.stringify({ kind, commodity: commodity.toLowerCase(), market, otherMarket, id, before, limit: 30, fleetState: kind === 'fleet' ? fleetState : '', fleetAfter: kind === 'fleet' ? fleetAfter : 0 })
+  const [fleetState, setFleetState] = useState('owned'); const [fleetAfter, setFleetAfter] = useState(0); const [fleetRevision, setFleetRevision] = useState(''); const [fleetSearch, setFleetSearch] = useState('')
+  const query = JSON.stringify({ kind, commodity: commodity.toLowerCase(), market, otherMarket, id, before, limit: 30, fleetState: kind === 'fleet' ? fleetState : '', fleetAfter: kind === 'fleet' ? fleetAfter : 0, fleetRevision: kind === 'fleet' && fleetAfter > 0 ? fleetRevision : '', ...(kind === 'fleet' ? { commodity: fleetSearch.slice(0, 128) } : {}) })
   useEffect(() => {
     let active = true; let pending = false; let timer
     setPage(null); setPreview(null); setAck(false)
-    if (props.role === 'owner' && props.connected && props.ready && kind !== 'external') {
+    if (props.connected && props.ready && kind !== 'external') {
       const load = async () => { if (pending) return; pending = true; try { const value = await props.sendEvent('getGoOperations', JSON.parse(query)); if (active) { setPage(value); setNotice('') } } catch (e) { if (active) setNotice('Operations unavailable; journal history retained.') } finally { pending = false } }
       load(); timer = setInterval(load, 3000)
     }
     return () => { active = false; clearInterval(timer) }
-  }, [props.role, props.connected, props.ready, props.sendEvent, query, revision, kind])
+  }, [props.connected, props.ready, props.sendEvent, query, revision, kind])
   const change = setter => event => { setter(event.target.value); setBefore(''); setPreview(null); setAck(false) }
-  if (props.role !== 'owner') return <section className='go-page'><h2>{title}</h2><Badge>LOCAL OWNER ONLY</Badge><p>Fleet, carrier finances, prices, transactions and other commanders’ names are private. Paired displays remain read-only; this private history is not transmitted.</p></section>
   if (initial === 'external') return <section className='go-page'><h2>{title}</h2><p>External community reference only. DAEDALUS has no verified consumable PTN/FCOC feed. No scraping or automatic external request.</p><a href={props.path.endsWith('/ptn') ? 'https://pilotstradenetwork.com/' : 'https://inara.cz/elite/squadron/7636/'} target='_blank' rel='noreferrer'>Open community website</a></section>
   if (!props.connected || !props.ready) return <p role='status'>Operations disconnected. Waiting for authenticated recovery.</p>
   if (initial === 'goals') return <GoCommunityGoals {...props} page={page} onRefresh={() => setRevision(v => v + 1)} />
   if (kind === 'modules') return <GoStoredModules page={page} onOlder={() => setBefore(page.next)} onNewest={() => setBefore('')} hasBefore={!!before} onFleet={initial === 'fleet' ? () => { setKind('fleet'); setBefore('') } : null} onHistory={() => { setKind('module-events'); setBefore('') }} />
-  if (initial === 'fleet' && kind === 'fleet') return <GoFleet page={page} sendEvent={props.sendEvent} fleetState={fleetState} onState={value => { setFleetState(value); setBefore(''); setFleetAfter(0) }} onOlder={() => { if (page.next) setBefore(page.next); else { setBefore(''); setFleetAfter(page.fleetNext) } }} onNewest={() => { setBefore(''); setFleetAfter(0) }} hasBefore={!!before || fleetAfter > 0} onModules={() => setKind('modules')} />
+  if (initial === 'fleet' && kind === 'fleet') return <GoFleet page={page} sendEvent={props.sendEvent} fleetState={fleetState} search={fleetSearch} onSearch={value => { setFleetSearch(value); setFleetAfter(0) }} onState={value => { setFleetState(value); setBefore(''); setFleetAfter(0) }} onOlder={() => { setFleetRevision(page.fleetRevision || ''); setFleetAfter(page.fleetNext) }} onNewest={() => setFleetAfter(0)} hasBefore={fleetAfter > 0} onModules={() => setKind('modules')} />
   const exportPage = async () => {
     try { const value = await props.sendEvent('exportGoOperations', { ...JSON.parse(query), acknowledge: ack, previewHash: preview?.hash }); const url = URL.createObjectURL(new Blob([value.csv], { type: 'text/csv;charset=utf-8' })); const a = document.createElement('a'); a.href = url; a.download = 'eridion-private-' + kind + '.csv'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000) } catch { setNotice('Private export unavailable. Preview and acknowledge first.') }
   }

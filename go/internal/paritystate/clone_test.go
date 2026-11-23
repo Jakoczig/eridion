@@ -58,3 +58,28 @@ func TestClonePreservesNilAndEmptyCollections(t *testing.T) {
 		}
 	}
 }
+
+func TestPerfStatusGetterIsDetachedAndMatchesView(t *testing.T) {
+	m := NewModel()
+	if got := m.Status("missing"); !reflect.DeepEqual(got, blank().Status) {
+		t.Fatalf("unknown account status = %#v", got)
+	}
+	f, g := 4.5, 2
+	s := m.get("SYNTHETIC-A")
+	s.v.Status = StatusView{State: "known", ObservedAt: "2026-11-22T10:00:00Z", Flags: &StatusFlags{InMainShip: true}, Flags2: &StatusFlags2{OnFoot: false}, Pips: &Pips{Sys: 4}, FuelMainT: &f, GuiFocus: &g}
+	got := m.Status("SYNTHETIC-A")
+	if !reflect.DeepEqual(got, m.View("SYNTHETIC-A").Status) {
+		t.Fatal("narrow getter differs from full view")
+	}
+	got.Flags.InMainShip = false
+	*got.FuelMainT = 0
+	got.Pips.Sys = 0
+	*got.GuiFocus = 9
+	if !s.v.Status.Flags.InMainShip || *s.v.Status.FuelMainT != 4.5 || s.v.Status.Pips.Sys != 4 || *s.v.Status.GuiFocus != 2 {
+		t.Fatal("status getter shares mutable state")
+	}
+	s.v.Status.Temperature = nil
+	if m.Status("SYNTHETIC-A").Temperature != nil {
+		t.Fatal("nil status field became present")
+	}
+}

@@ -16,12 +16,12 @@ test('goal cards join exact Frontier IDs without inventing participation and pre
 test('Community Goals has one owner-controlled Frontier refresh and no export or automatic online request', async () => {
   const h = harness('go-community-goals', () => ({ rows: [] }))
   Object.assign(h.props, { role: 'owner', page: { goalMembership: { known: true, ids: [] }, rows: [] } })
-  try { const html = h.html(); await h.flush(); assert.match(html, /Refresh Frontier goals/); assert.doesNotMatch(html, /export|commander select|local journal observation/i); assert.ok(h.calls.every(n => n === 'getGoProviders')) } finally { h.unmount() }
+  try { const html = h.html(); await h.flush(); assert.match(html, /Refresh Frontier goals/); assert.doesNotMatch(html, /export|commander select|local journal observation/i); assert.ok(h.calls.every(n => n === 'getGoProviderGameplay')) } finally { h.unmount() }
 })
 
 test('Fleet has owned/sold filters, exact value formatting and bounded pagination controls', () => {
   const h = harness('go-fleet'); Object.assign(h.props, { page: { rows: [{ id: '1', entity: '1', state: 'known_active', details: { shipName: 'Fixture Ship', modelLabel: 'Asp Explorer', Value: '9007199254740993' } }, { id: '2', entity: '2', state: 'sold', details: { shipName: 'SOLD FIXTURE' } }], next: '2' } })
-  try { const html = h.html(); assert.match(html, /Fixture Ship/); assert.doesNotMatch(html, /SOLD FIXTURE/); assert.match(html, /Fleet view/); assert.match(html, /Older ships/) } finally { h.unmount() }
+  try { const html = h.html(); assert.match(html, /Fixture Ship/); assert.doesNotMatch(html, /SOLD FIXTURE/); assert.match(html, /Fleet view/); assert.match(html, /More ships/) } finally { h.unmount() }
 })
 
 test('activity groups never add influence ratings or mix award and redemption', () => {

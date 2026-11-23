@@ -3,12 +3,15 @@ package history
 import (
 	"database/sql"
 	"strings"
+
+	"github.com/Jakoczig/eridion/go/internal/catalog"
 )
 
 func normalizeFleet(tx *sql.Tx, event int64, fid, kind, at string, v map[string]any) error {
 	ordinal := 0
 	put := func(id, model, name, state, system, market string, data map[string]any) error {
-		if id == "" {
+		// Suits, SRVs, fighters and taxis are never owned main ships.
+		if id == "" || (model != "" && catalog.VehicleKind(model) != "ship") {
 			return nil
 		}
 		ordinal++

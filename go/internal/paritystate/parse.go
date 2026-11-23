@@ -355,6 +355,9 @@ func parseStatus(d map[string]any) StatusView {
 	}
 	out.State = "known"
 	out.GuiFocus = integer(d["GuiFocus"], 32)
+	if out.Flags2 != nil && out.Flags2.OnFoot {
+		out.OnFoot = &OnFootStatus{Health: number(d["Health"], 0, 1), Oxygen: number(d["Oxygen"], 0, 1), TemperatureK: number(d["Temperature"], 0, 1e5), GravityG: number(d["Gravity"], 0, 1e3), SelectedWeapon: text(d["SelectedWeapon"]), SelectedWeaponLabel: text(d["SelectedWeapon_Localised"]), BodyName: text(d["BodyName"]), LowHealth: out.Flags2.LowHealth, LowOxygen: out.Flags2.LowOxygen, BreathableAtmos: out.Flags2.BreathableAtmosphere}
+	}
 	// Status fuel/cargo belong to the controlled vehicle. Only a main-ship
 	// attestation permits projecting these as ship facts.
 	if !out.Flags.InMainShip || out.Flags.InSRV || out.Flags.InFighter {

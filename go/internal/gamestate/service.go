@@ -2,9 +2,7 @@ package gamestate
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"github.com/Jakoczig/eridion/go/internal/privatefs"
 	"os"
 	"strings"
 	"sync"
@@ -33,7 +31,15 @@ type Summary struct {
 	EventsRead       uint64 `json:"eventsRead"`
 }
 type Options struct {
-	DisplayAccount  func(string, bool)
+	// DisplayAccount receives the commander every trusted display shows, whether
+	// a single-account legacy grant is verified, and whether the account is
+	// host-authorized (resolved default or launcher selection) rather than the
+	// journal-active fallback used before a default is chosen.
+	DisplayAccount func(fid string, verifiedSingle bool, authoritative bool)
+	// ProviderAccount is told the commander whose provider namespace may now
+	// run when single-commander adoption resolves the default; until then
+	// the provider manager stays blocked. Called with the service lock held.
+	ProviderAccount func(string)
 	ProviderSidecar func(sidecar.Change)
 	OnHistoryReady  func(*history.Store, history.ProviderSeed)
 	StorageDir      string
@@ -65,6 +71,11 @@ type Service struct {
 	startup             journal.Startup
 	needsStartupRebuild bool
 	accounts            AccountSettings
+	accountsError       string
+	// defaultInvalid explains why the stored default (or a migrated legacy
+	// selection) is not used: it names no verified commander once history is
+	// complete. The launcher asks once; providers stay blocked meanwhile.
+	defaultInvalid      string
 	legacyPairingFID    string
 	statisticsKey       string
 	statisticsJSON      []byte
@@ -104,14 +115,14 @@ func NewService(opts Options) (*Service, error) {
 	if opts.StorageDir != "" {
 		initialStage = "RESTORING_CACHE"
 	}
-	var accounts AccountSettings
-	if opts.StorageDir != "" {
-		if raw, e := privatefs.Read(opts.StorageDir, "accounts-v1.json"); e == nil {
-			_ = json.Unmarshal(raw, &accounts)
-		}
-	}
-	return &Service{accounts: accounts, maintenance: make(chan maintenanceRequest), navigationContext: navcontext.New(), views: newProjectionState(), opts: opts, summary: Summary{Stage: initialStage, SourceState: "waiting", ImportInProgress: true}, details: SourceDetails{Override: opts.Directory, Sidecars: map[string]string{}}, commanders: map[string]commanderState{}, subscribers: map[chan Summary]struct{}{}, selectSource: make(chan selection), done: make(chan struct{})}, nil
+	accounts, accountsError := loadAccountsForService(opts.StorageDir)
+	return &Service{accounts: accounts, accountsError: accountsError, maintenance: make(chan maintenanceRequest), navigationContext: navcontext.New(), views: newProjectionState(), opts: opts, summary: Summary{Stage: initialStage, SourceState: "waiting", ImportInProgress: true}, details: SourceDetails{Override: opts.Directory, Sidecars: map[string]string{}}, commanders: map[string]commanderState{}, subscribers: map[chan Summary]struct{}{}, selectSource: make(chan selection), done: make(chan struct{})}, nil
 }
+
+// beforeStartupRebuild is a test hook run between restoring a legacy cache
+// and rebuilding its startup projections; nil in production.
+var beforeStartupRebuild func(*Service)
+
 func (s *Service) Snapshot() Summary {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -129,7 +140,8 @@ func (s *Service) Details() SourceDetails {
 }
 func (s *Service) publishLocked() {
 	if s.opts.DisplayAccount != nil {
-		s.opts.DisplayAccount(s.displayFIDLocked(), !s.accounts.Multiple && s.legacyPairingFID != "" && s.legacyPairingFID == s.displayFIDLocked() && len(s.commanders) == 1)
+		fid := s.displayFIDLocked()
+		s.opts.DisplayAccount(fid, !s.accounts.Multiple && s.legacyPairingFID != "" && s.legacyPairingFID == fid && len(s.commanders) == 1, fid != "" && fid == s.hostAccountLocked())
 	}
 	s.publishProjectionsLocked()
 	for ch := range s.subscribers {
@@ -260,6 +272,9 @@ func (s *Service) Run(ctx context.Context) error {
 				e = s.restoreCacheLocked(raw)
 				if e == nil {
 					s.restored = true
+					// No default adoption here: the cache has not yet seen the
+					// journals written while ERIDION was closed. Adoption and
+					// default validation run when the catch-up import completes.
 					s.summary.Cached = true
 					s.summary.Stage = "CATCHING_UP"
 					savedSummary := s.summary
@@ -269,10 +284,20 @@ func (s *Service) Run(ctx context.Context) error {
 					s.summary = savedSummary
 					v.Source = savedSummary
 					s.holdProjectionLocked(v)
+					if s.needsStartupRebuild {
+						// A legacy cache lacks startup projections: report the
+						// rebuild as an import before releasing the lock so no
+						// observer sees a "complete" summary with empty views.
+						s.summary.ImportInProgress = true
+						s.summary.SourceState = "replaying"
+					}
 				}
 				s.mu.Unlock()
 			}
 			if e == nil && s.needsStartupRebuild {
+				if beforeStartupRebuild != nil {
+					beforeStartupRebuild(s)
+				}
 				e = s.rebuildDerived(ctx)
 			}
 			err = e
@@ -486,6 +511,13 @@ func (s *Service) Run(ctx context.Context) error {
 			} else {
 				s.summary.ImportInProgress = false
 			}
+			if !s.summary.ImportInProgress {
+				// History is complete: check the stored default against the
+				// verified commanders, then adopt one only if exactly one
+				// verified commander exists, never by import order.
+				s.validateDefaultLocked()
+				s.adoptDefaultLocked()
+			}
 			if s.store != nil && s.databaseError == "" {
 				if s.summary.ImportInProgress {
 					if s.restored {
@@ -558,6 +590,9 @@ func (s *Service) applyEventLocked(event journal.Event, phase journal.Phase) {
 				}
 				s.order = append(s.order, s.active)
 				s.commanders[s.active] = commanderState{}
+				if phase == journal.Live && !s.summary.ImportInProgress {
+					s.adoptDefaultLocked() // first verified live identity
+				}
 			}
 		}
 	case "Location", "FSDJump", "CarrierJump":

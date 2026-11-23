@@ -14,8 +14,11 @@ export function useCommunity (props, local) {
     }
     load()
     const timer = setInterval(load, 15000)
-    return () => { active = false; clearInterval(timer) }
-  }, [props.stage, props.connected, props.ready, props.role, props.sendEvent, props.communityVersion, local])
+    // A consent change made in the launcher (another window) is pushed by the
+    // host, so an open map drops or restores community data at once.
+    const stop = props.eventListener ? props.eventListener('goCommunityChanged', () => { if (active) load() }) : () => {}
+    return () => { active = false; clearInterval(timer); stop() }
+  }, [props.stage, props.connected, props.ready, props.role, props.sendEvent, props.eventListener, props.communityVersion, local])
   return value
 }
 export default function GoCommunitySettings ({ sendEvent, onChange }) {

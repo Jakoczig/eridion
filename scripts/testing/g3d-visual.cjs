@@ -9,7 +9,7 @@ async function main () {
   const evaluate = async expression => { const r = await c.call('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (r.exceptionDetails) throw Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text); return r.result.value }
   const click = text => evaluate(`Array.from(document.querySelectorAll('.go-galaxy-sidebar button, .go-fsd>.go-page__heading button')).find(b=>b.textContent===${JSON.stringify(text)})?.click()`)
   const shot = async name => { const r = await c.call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }); await fs.writeFile(path.join(output, name + '.png'), Buffer.from(r.data, 'base64')) }
-  const rpc = (name, message) => evaluate(`new Promise((resolve,reject)=>{const w=new WebSocket(location.origin.replace('http:','ws:'));w.onopen=()=>w.send(JSON.stringify({requestId:'g3d',name:${JSON.stringify(name)},message:${JSON.stringify(message)}}));w.onmessage=e=>{const r=JSON.parse(e.data);if(r.requestId==='g3d'){w.close();r.error?reject(Error(r.error)):resolve(r.message)}};w.onerror=reject})`)
+  const rpc = (name, message) => evaluate(`new Promise((resolve,reject)=>{const w=new WebSocket(location.origin.replace('http:','ws:')+'/?scope=launcher');w.onopen=()=>w.send(JSON.stringify({requestId:'g3d',name:${JSON.stringify(name)},message:${JSON.stringify(message)}}));w.onmessage=e=>{const r=JSON.parse(e.data);if(r.requestId==='g3d'){w.close();r.error?reject(Error(r.error)):resolve(r.message)}};w.onerror=reject})`)
   c.on(e => {
     if (e.method === 'Runtime.exceptionThrown') report.errors.push(e.params.exceptionDetails.exception?.description)
     if (e.method === 'Fetch.requestPaused') { const p = e.params; const ok = p.request.url.startsWith(origin + '/') || p.request.url.startsWith('data:'); if (!ok) report.external.push(p.request.url); c.call(ok ? 'Fetch.continueRequest' : 'Fetch.failRequest', ok ? { requestId: p.requestId } : { requestId: p.requestId, errorReason: 'BlockedByClient' }).catch(() => {}) }
@@ -42,7 +42,9 @@ async function main () {
     await evaluate('document.querySelector(\'[aria-label="Galaxy zoom in"]\').click()')
     await waitFor(() => evaluate('document.querySelector(".go-g3d").dataset.mode==="local"'))
     report.zoomTransitions = true
-    await click('Fit Route'); await waitFor(() => evaluate('document.querySelector(".go-galaxy-axes")?.textContent.includes("200 LY")'))
+    // XYZ controls stay visible while Local data load (Task 3 / F04): wait for
+    // the fitted slice's data before counting idle requests.
+    await click('Fit Route'); await waitFor(() => evaluate('document.querySelector(".go-galaxy-axes")?.textContent.includes("200 LY")&&document.querySelector(".go-g3d").dataset.mode==="local"&&!document.querySelector(".go-galaxy-local-status")'))
     const count = await evaluate('window.g3dRequests.length'); const first = Object.fromEntries((await c.call('Performance.getMetrics')).metrics.map(m => [m.name, m.value])); await delay(1200)
     const last = Object.fromEntries((await c.call('Performance.getMetrics')).metrics.map(m => [m.name, m.value])); report.idle = { heapBytes: last.JSHeapUsedSize, mainThreadPercent: 100 * (last.TaskDuration - first.TaskDuration) / (last.Timestamp - first.Timestamp) }
     if (await evaluate('window.g3dRequests.length') !== count) throw Error('Stable view repeatedly requested spatial data')

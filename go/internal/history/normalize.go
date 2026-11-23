@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/Jakoczig/eridion/go/internal/journal"
+	"github.com/Jakoczig/eridion/go/internal/paritystate"
 	"math"
 	"strconv"
 	"strings"
@@ -84,6 +85,11 @@ func relevant(kind string) bool {
 		return true
 	}
 	if strings.HasPrefix(kind, "Powerplay") {
+		return true
+	}
+	// Exosuit equipment evidence (Task 14): without these payloads a rebuild
+	// from history cannot reproduce known suits and loadouts.
+	if paritystate.IsExosuitEvent(kind) {
 		return true
 	}
 	switch kind {
@@ -221,8 +227,12 @@ func (s *Store) normalize(tx *sql.Tx, source string, records []journal.Record, c
 			if n, ok := v["Credits"].(json.Number); ok {
 				facts["credits"] = string(n)
 			}
-		case "Rank", "Progress":
+		case "Rank":
 			facts["ranks"] = v
+		case "Progress":
+			// Progress percentages belong to the current level; they are
+			// separate evidence and never replace a witnessed Rank level.
+			facts["rankProgress"] = v
 		case "SquadronStartup", "JoinedSquadron":
 			facts["squadron"] = v
 		case "CommunityGoal":
@@ -230,7 +240,7 @@ func (s *Store) normalize(tx *sql.Tx, source string, records []journal.Record, c
 		}
 		for field, value := range facts {
 			raw, _ := json.Marshal(exactFactValue(value))
-			if _, err = tx.Exec("INSERT INTO field_provenance(entity,field,commander_fid,source,source_ref,observed_at,fetched_at,confidence,stale,value_json) VALUES('commander',?,?,'journal',?,?,?,'witnessed local event',0,?)", field, fid.String, strconv.FormatInt(eventID, 10), stamp, utc(), string(raw)); err != nil {
+			if _, err = tx.Exec("INSERT INTO field_provenance(entity,field,commander_fid,source,source_ref,observed_at,fetched_at,confidence,stale,value_json,observed_key) VALUES('commander',?,?,'journal',?,?,?,'witnessed local event',0,?,?)", field, fid.String, strconv.FormatInt(eventID, 10), stamp, utc(), string(raw), observationKey(stamp)); err != nil {
 				return err
 			}
 		}
@@ -282,7 +292,7 @@ func (s *Store) normalize(tx *sql.Tx, source string, records []journal.Record, c
 			}
 		}
 		if e.Type == "ColonisationConstructionDepot" && identifier(v["MarketID"]) != "" {
-			if _, err = tx.Exec("INSERT INTO colonisation_projects VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(commander_fid,market_id) DO UPDATE SET system_address=excluded.system_address,construction_progress=excluded.construction_progress,complete=excluded.complete,failed=excluded.failed,observed_at=excluded.observed_at,source_event_id=excluded.source_event_id", fid.String, identifier(v["MarketID"]), null(address), number(v["ConstructionProgress"]), boolean(v["ConstructionComplete"]), boolean(v["ConstructionFailed"]), stamp, eventID); err != nil {
+			if err = upsertColonisationProject(tx, fid.String, eventID, address, stamp, v); err != nil {
 				return err
 			}
 		}

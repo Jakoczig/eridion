@@ -23,6 +23,16 @@ let connectionGeneration = 0
 let deferredEventQueue = [] // Store events waiting to be sent (used when server is not ready yet or offline)
 let recentBroadcastEvents = 0
 let broadcastActivityTimeout = null
+// Host account epoch (Task 13): every request carries the epoch it was issued
+// under; replies from another epoch are rejected, so nothing requested for a
+// previous commander can update the current view or run under a new one.
+let accountEpoch = null
+const EPOCH_EXEMPT = new Set(['getLoadingStatus', 'hostInfo', 'getGoAccounts', 'setGoAccounts'])
+// The launcher window owns settings; every other page is a gameplay display.
+function socketURL (location) {
+  const base = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host
+  return location.protocol !== 'https:' && /^\/launcher(\/|$)/.test(location.pathname) ? base + '/?scope=launcher' : base
+}
 
 const defaultSocketState = {
   role: null,
@@ -141,21 +151,36 @@ async function connect (socketState, setSocketState) {
   }
   recentBroadcastEvents = 0
 
-  socket = new WebSocket((window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host)
+  accountEpoch = null
+  socket = new WebSocket(socketURL(window.location))
   const connection = socket
   const current = () => socket === connection && generation === connectionGeneration
   if (process.env.NODE_ENV === 'development') devLog('[SOCKET] Connecting to service')
   socket.onmessage = (event) => {
     if (!current()) return
-    let requestId, name, message
+    let envelope
     try {
-      ({ requestId, name, message } = JSON.parse(event.data))
+      envelope = JSON.parse(event.data)
     } catch (e) {
       console.error('Failed to parse socket message:', e)
       return
     }
-    // Invoke callback to handler (if there is one)
-    if (requestId && callbackHandlers[requestId]) callbackHandlers[requestId](event, setSocketState)
+    if (!envelope || typeof envelope !== 'object') return
+    const { requestId, name, message } = envelope
+    if (name === 'accountEpoch' && !requestId) {
+      const next = message?.epoch
+      if (accountEpoch !== null && next !== accountEpoch) {
+        // The host switched commander while this (launcher) connection stayed
+        // open: drop requests issued for the previous commander and refresh.
+        cancelPending()
+        window.dispatchEvent(new Event('eridion-account-changed'))
+      }
+      accountEpoch = next ?? null
+      return
+    }
+    // Invoke callback to handler (if there is one) with the decoded envelope;
+    // each frame is parsed exactly once.
+    if (requestId && callbackHandlers[requestId]) callbackHandlers[requestId](envelope, setSocketState)
 
     // Updating resync whern loading completes tells any components to resync
     // with the server. it is useful for remote clients that disconnects then
@@ -191,10 +216,7 @@ async function connect (socketState, setSocketState) {
         broadcastActivityTimeout = setTimeout(() => {
           broadcastActivityTimeout = null
           recentBroadcastEvents = 0
-          setSocketState(prevState => ({
-            ...prevState,
-            active: socketRequestsPending()
-          }))
+          updateActivity(setSocketState)
         }, 500)
       }
 
@@ -335,11 +357,8 @@ async function connect (socketState, setSocketState) {
     while (socket.readyState === WebSocket.OPEN && deferredEventQueue.length > 0) {
       const { requestId, name, message } = deferredEventQueue[0]
       try {
-        socket.send(JSON.stringify({ requestId, name, message }))
-        setSocketState(prevState => ({
-          ...prevState,
-          active: socketRequestsPending()
-        }))
+        socket.send(JSON.stringify(deferredEventQueue[0].epoch == null ? { requestId, name, message } : { requestId, name, message, epoch: deferredEventQueue[0].epoch }))
+        updateActivity(setSocketState)
         deferredEventQueue.shift() // Remove message from queue once delivered
         socketDebugMessage('Queued message sent to socket server', requestId, name, message)
       } catch (e) {
@@ -518,16 +537,15 @@ function sendEvent (name, message = null, timeout = 30000) {
     const sendStart = (process.env.NODE_ENV === 'development') ? Date.now() : 0
     if (process.env.NODE_ENV === 'development') devLog(`[SEND] → ${name}  id=${requestId.slice(0, 8)}`)
     let timer = null
-    callbackHandlers[requestId] = (event, setSocketState) => {
+    const epoch = accountEpoch
+    callbackHandlers[requestId] = (parsed, setSocketState) => {
       if (timer) clearTimeout(timer)
-      const parsed = JSON.parse(event.data)
       delete callbackHandlers[requestId]
       if (process.env.NODE_ENV === 'development') devLog(`[SEND] ← ${name}  id=${requestId.slice(0, 8)}  ${Date.now() - sendStart}ms`)
-      setSocketState(prevState => ({
-        ...prevState,
-        active: socketRequestsPending()
-      }))
-      if (parsed.error) {
+      updateActivity(setSocketState)
+      if (epoch !== null && parsed.epoch != null && parsed.epoch !== epoch && !EPOCH_EXEMPT.has(name)) {
+        reject(new Error('Commander changed; retry for the selected commander'))
+      } else if (parsed.error) {
         reject(new Error(parsed.error))
       } else {
         resolve(parsed.message)
@@ -542,10 +560,11 @@ function sendEvent (name, message = null, timeout = 30000) {
         reject(new Error(`sendEvent '${name}' timed out after ${timeout}ms`))
       }, timeout)
     }
+    const frame = epoch === null ? { requestId, name, message } : { requestId, name, message, epoch }
     if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ requestId, name, message }))
+      socket.send(JSON.stringify(frame))
     } else {
-      deferredEventQueue.push({ requestId, name, message })
+      deferredEventQueue.push(frame)
     }
   })
 }
@@ -554,6 +573,16 @@ function eventListener (eventName, callback) {
   const eventHandler = (e) => { callback(e.detail) }
   window.addEventListener(`socketEvent_${eventName}`, eventHandler)
   return () => window.removeEventListener(`socketEvent_${eventName}`, eventHandler)
+}
+
+// updateActivity keeps the previous state object when the computed activity
+// flag is unchanged, so unrelated socket traffic does not rerender every
+// consumer of the socket context.
+function updateActivity (setSocketState) {
+  setSocketState(prevState => {
+    const active = socketRequestsPending()
+    return prevState.active === active ? prevState : { ...prevState, active }
+  })
 }
 
 function socketRequestsPending () {
@@ -571,5 +600,6 @@ module.exports = {
   eventListener,
   socketOptions,
   setSocketOption,
-  devLog
+  devLog,
+  socketURL
 }

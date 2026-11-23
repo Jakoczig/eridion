@@ -24,7 +24,7 @@ async function main () {
       if (Math.abs(home.height - home.viewport) > 2 || home.overflow > 2 || home.preview || !home.buttons.every(Boolean) || home.rows.join('|') !== 'Journal|Paired / connected devices|Live Services') throw Error('Launcher home clipped or cluttered: ' + JSON.stringify(home))
       await screenshot(name + '-home'); await click('Settings')
       const names = await evaluate('Array.from(document.querySelectorAll(".go-companion-settings>button")).map(b=>b.textContent)')
-      if (names.join('|') !== 'General|Journal & Commander|External Services|Galaxy Map|Credits') throw Error('Settings category contract')
+      if (names.join('|') !== 'General|Journal & Commander|External Services|Galaxy Map|Advanced|Credits') throw Error('Settings category contract')
       for (const category of names) {
         await click(category)
         await waitFor(() => evaluate('document.querySelectorAll(".go-companion-settings>button[aria-expanded=true]").length===1'))

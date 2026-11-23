@@ -7,7 +7,7 @@ import (
 	"encoding/gob"
 )
 
-const CacheFormat = "7c36e0ef1c3d4247c46c4144908a6ff92e1df9df3d7dbdbf3b5707fc360df50b"
+const CacheFormat = "16fd9019f79c84f5c4f32363bc2de5e6766c326fc0f37336778eef0af89de795"
 
 type persistedorganismState struct {
 	FView     OrganismView
@@ -166,6 +166,7 @@ func (v *systemState) GobDecode(raw []byte) error {
 }
 
 type persistedModel struct {
+	FTouched  bool
 	FSessions map[string]*contextState
 	FOrder    []string
 	FSystems  map[systemKey]*systemState
@@ -174,7 +175,7 @@ type persistedModel struct {
 
 func (v Model) GobEncode() ([]byte, error) {
 	var b bytes.Buffer
-	err := gob.NewEncoder(&b).Encode(persistedModel{FSessions: v.sessions, FOrder: v.order, FSystems: v.systems, FLru: v.lru})
+	err := gob.NewEncoder(&b).Encode(persistedModel{FTouched: v.touched, FSessions: v.sessions, FOrder: v.order, FSystems: v.systems, FLru: v.lru})
 	return b.Bytes(), err
 }
 func (v *Model) GobDecode(raw []byte) error {
@@ -182,9 +183,40 @@ func (v *Model) GobDecode(raw []byte) error {
 	if err := gob.NewDecoder(bytes.NewReader(raw)).Decode(&p); err != nil {
 		return err
 	}
+	v.touched = p.FTouched
 	v.sessions = p.FSessions
 	v.order = p.FOrder
 	v.systems = p.FSystems
 	v.lru = p.FLru
+	return nil
+}
+
+type persistedsessionFingerprint struct {
+	FVerified      bool
+	FArrived       bool
+	FPending       bool
+	FContinuous    bool
+	FAddress       string
+	FName          string
+	FActiveOrganic *organismState
+}
+
+func (v sessionFingerprint) GobEncode() ([]byte, error) {
+	var b bytes.Buffer
+	err := gob.NewEncoder(&b).Encode(persistedsessionFingerprint{FVerified: v.verified, FArrived: v.arrived, FPending: v.pending, FContinuous: v.continuous, FAddress: v.address, FName: v.name, FActiveOrganic: v.activeOrganic})
+	return b.Bytes(), err
+}
+func (v *sessionFingerprint) GobDecode(raw []byte) error {
+	var p persistedsessionFingerprint
+	if err := gob.NewDecoder(bytes.NewReader(raw)).Decode(&p); err != nil {
+		return err
+	}
+	v.verified = p.FVerified
+	v.arrived = p.FArrived
+	v.pending = p.FPending
+	v.continuous = p.FContinuous
+	v.address = p.FAddress
+	v.name = p.FName
+	v.activeOrganic = p.FActiveOrganic
 	return nil
 }

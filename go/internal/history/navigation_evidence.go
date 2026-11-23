@@ -3,6 +3,7 @@ package history
 import (
 	"database/sql"
 	"encoding/json"
+	"time"
 )
 
 type NavigationEvidence struct {
@@ -15,10 +16,25 @@ type NavigationEvidence struct {
 }
 
 func (s *Store) FieldNavigationEvidence(fid string) (NavigationEvidence, error) {
+	return s.fieldNavigationEvidenceAt(fid, time.Now())
+}
+
+// latestEventOfType returns the chronologically best retained event of one
+// type: plausible observations first, then deterministic immutable ties.
+// Ingestion order (event_id) never decides which evidence is current.
+func (s *Store) latestEventOfType(fid, kind string, now time.Time) (raw, at string, err error) {
+	const order = " ORDER BY event_utc DESC,source_id DESC,byte_offset DESC,line_hash DESC LIMIT 1"
+	err = s.reader.QueryRow("SELECT raw_relevant_json,coalesce(event_utc,'') FROM journal_events WHERE commander_fid=? AND type=? AND event_utc<>'' AND event_utc<=?"+order, fid, kind, observationCutoff(now)).Scan(&raw, &at)
+	if err == sql.ErrNoRows {
+		err = s.reader.QueryRow("SELECT raw_relevant_json,coalesce(event_utc,'') FROM journal_events WHERE commander_fid=? AND type=?"+order, fid, kind).Scan(&raw, &at)
+	}
+	return raw, at, err
+}
+
+func (s *Store) fieldNavigationEvidenceAt(fid string, now time.Time) (NavigationEvidence, error) {
 	out := NavigationEvidence{}
 	for _, kind := range []string{"JetConeBoost", "JetConeDamage", "FuelScoop"} {
-		var raw, at string
-		e := s.reader.QueryRow("SELECT raw_relevant_json,coalesce(event_utc,'') FROM journal_events WHERE commander_fid=? AND type=? ORDER BY event_id DESC LIMIT 1", fid, kind).Scan(&raw, &at)
+		raw, at, e := s.latestEventOfType(fid, kind, now)
 		if e == sql.ErrNoRows {
 			continue
 		}

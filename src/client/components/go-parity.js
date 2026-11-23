@@ -2,12 +2,13 @@ import dynamic from 'next/dynamic'
 import useGoProjection from './go-projection'
 import GoProviderReference from './go-provider-reference'
 import GoCommanderOverview from './go-commander-overview'
+import GoExosuit from './go-exosuit'
 import GoShipStatistics from './go-ship-statistics'
 import GoParityShip from './go-parity-ship'
 import GoParityActivity, { GoMiningRings } from './go-parity-activity'
 
 const GoEngineering = dynamic(() => import('./go-engineering'), { loading: () => <p>Loading bundled engineering reference…</p> })
-export const parityPaths = ['/ship/status', '/ship/stats', '/ship/modules', '/ship/cargo', '/ship/inventory', '/cmdr/overview', '/cmdr/session', '/missions/overview', '/mining/status', '/mining/statistics', '/mining/log', '/mining/rings', '/eng/blueprints', '/eng/engineers', '/eng/raw-materials', '/eng/manufactured-materials', '/eng/encoded-materials', '/eng/xeno-materials', '/eng/material-planner', '/eng/wishlist']
+export const parityPaths = ['/ship/status', '/ship/stats', '/ship/modules', '/ship/cargo', '/ship/inventory', '/cmdr/overview', '/cmdr/exosuit', '/cmdr/session', '/missions/overview', '/mining/status', '/mining/statistics', '/mining/log', '/mining/rings', '/eng/blueprints', '/eng/engineers', '/eng/raw-materials', '/eng/manufactured-materials', '/eng/encoded-materials', '/eng/xeno-materials', '/eng/material-planner', '/eng/wishlist']
 const flightDelta = { name: 'goFlightChanged', merge: (workspace, status) => ({ ...workspace, parity: { ...workspace.parity, status } }) }
 export default function GoParity (props) {
   const { value, error } = useGoProjection(props, 'getGoWorkspace', 'goWorkspaceChanged', flightDelta)
@@ -16,6 +17,7 @@ export default function GoParity (props) {
   if (props.path === '/mining/rings') return <GoMiningRings {...props} />
   if (props.path.startsWith('/eng/')) return <GoEngineering key={props.path} path={props.path} workspace={value} />
   if (props.path === '/cmdr/overview') return <GoCommanderOverview {...props} workspace={value} />
+  if (props.path === '/cmdr/exosuit') return <GoExosuit workspace={value} />
   if (props.path === '/ship/stats') return <><GoShipStatistics {...props} workspace={value} /><GoProviderReference {...props} /></>
   if (props.path.startsWith('/ship/')) return <GoParityShip {...props} key={props.path} path={props.path} workspace={value} />
   return <><GoParityActivity key={props.path} path={props.path} workspace={value} />{props.path.startsWith('/cmdr/') && <GoProviderReference {...props} />}</>

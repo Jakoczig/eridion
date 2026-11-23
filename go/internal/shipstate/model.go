@@ -5,6 +5,7 @@ package shipstate
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/Jakoczig/eridion/go/internal/catalog"
 	"github.com/Jakoczig/eridion/go/internal/journal"
 	"math"
 	"strconv"
@@ -29,6 +30,10 @@ type View struct {
 	UnladenMassT        *float64 `json:"unladenMassT"`
 	Docked              *bool    `json:"docked"`
 	Landed              *bool    `json:"landed"`
+	// Controlled is the entity the commander currently controls according to
+	// the journal: "ship", "suit", "srv", "fighter" or "taxi" ("" = unknown).
+	// The ship fields above always describe the real main ship.
+	Controlled string `json:"controlled"`
 }
 type state struct {
 	v        View
@@ -36,6 +41,11 @@ type state struct {
 	file, id string
 	offset   int64
 	sequence uint64
+	// memo/memoID keep the last verified real main ship of this commander so
+	// an on-foot or vehicle LoadGame can show it as last-known instead of
+	// treating the suit or vehicle as the ship.
+	memo   View
+	memoID string
 }
 type Model struct {
 	states map[string]*state
@@ -75,7 +85,7 @@ func (m *Model) View(key string) View {
 
 // Identity is internal cache context; it is never a public projection field.
 func (m *Model) Identity(key string) string {
-	if s := m.states[key]; s != nil && s.verified {
+	if s := m.states[key]; s != nil && s.verified && (s.v.Controlled == "" || s.v.Controlled == "ship") {
 		return s.id
 	}
 	return ""
@@ -129,15 +139,22 @@ func (m *Model) ApplyEvent(key string, e journal.Event) {
 		s.verified = false
 		s.v = View{Evidence: "unverified"}
 	}
-	defer func() { s.file = e.Position.FileID; s.offset = e.Position.Offset; s.sequence = e.Position.Sequence }()
+	defer func() {
+		s.file = e.Position.FileID
+		s.offset = e.Position.Offset
+		s.sequence = e.Position.Sequence
+		if s.verified && s.id != "" && s.v.ShipType != "" && (s.v.Controlled == "" || s.v.Controlled == "ship") {
+			s.memo, s.memoID = Clone(s.v), s.id
+		}
+	}()
 	if e.Type == "LoadGame" || e.Type == "Fileheader" {
-		*s = state{v: View{Evidence: "unknown"}, verified: e.Type == "LoadGame" && key != "" && e.FID != ""}
+		*s = state{v: View{Evidence: "unknown"}, verified: e.Type == "LoadGame" && key != "" && e.FID != "", memo: s.memo, memoID: s.memoID}
 	}
 	if !s.verified {
 		return
 	}
 	switch e.Type {
-	case "LoadGame", "Loadout", "SetUserShipName", "FSDJump", "FuelScoop", "HullDamage", "RefuelAll", "RefuelPartial", "Docked", "Undocked", "Touchdown", "Liftoff", "Location", "ShipyardSwap", "ShipyardBuy", "Shutdown":
+	case "LoadGame", "Loadout", "SetUserShipName", "FSDJump", "FuelScoop", "HullDamage", "RefuelAll", "RefuelPartial", "Docked", "Undocked", "Touchdown", "Liftoff", "Location", "ShipyardSwap", "ShipyardBuy", "Shutdown", "Embark", "Disembark", "LaunchSRV", "DockSRV":
 	default:
 		return
 	}
@@ -169,7 +186,19 @@ func (m *Model) ApplyEvent(key string, e journal.Event) {
 	}
 	switch e.Type {
 	case "LoadGame":
-		s.v.ShipType = shipType(data["Ship"])
+		symbol := shipType(data["Ship"])
+		if kind := catalog.VehicleKind(symbol); kind != "" && kind != "ship" {
+			// On foot, in an SRV, fighter or taxi: the real ship stays
+			// last-known (or unknown); vehicle fuel never becomes ship fuel.
+			if s.memoID != "" {
+				s.v, s.id = Clone(s.memo), s.memoID
+				s.v.Evidence, s.v.FuelMainT = "journal_last_known", nil
+			}
+			s.v.Controlled = kind
+			return
+		}
+		s.v.Controlled = "ship"
+		s.v.ShipType = symbol
 		s.id = shipID(data["ShipID"])
 		numeric(data, "FuelLevel", 0, 1e6, &s.v.FuelMainT)
 		numeric(data, "FuelCapacity", 0, 1e6, &s.v.FuelCapacityT)
@@ -181,17 +210,25 @@ func (m *Model) ApplyEvent(key string, e journal.Event) {
 		}
 	case "Loadout":
 		kind, id := shipType(data["Ship"]), shipID(data["ShipID"])
-		fuel := s.v.FuelMainT
-		if kind == "" || id == "" || kind != s.v.ShipType || id != s.id {
-			fuel = nil
+		if vehicle := catalog.VehicleKind(kind); vehicle != "" && vehicle != "ship" {
+			return
 		}
-		s.v = View{ShipType: kind, Evidence: "journal_last_known", FuelMainT: fuel}
+		fuel, name := s.v.FuelMainT, s.v.ShipName
+		if kind == "" || id == "" || kind != s.v.ShipType || id != s.id {
+			fuel, name = nil, ""
+		}
+		s.v = View{ShipType: kind, Evidence: "journal_last_known", FuelMainT: fuel, Controlled: "ship"}
 		s.id = id
 		if !e.Timestamp.IsZero() {
 			s.v.LoadoutAt = e.Timestamp.UTC().Format(time.RFC3339)
 		}
-		if name, ok := data["ShipName"].(string); ok && len(name) <= 80 && strings.IndexFunc(name, unicode.IsControl) < 0 {
-			s.v.ShipName = name
+		// A Loadout that omits ShipName keeps the same ship's known name; an
+		// explicitly reported (even empty) name replaces it.
+		s.v.ShipName = name
+		if raw, present := data["ShipName"]; present {
+			if reported, ok := raw.(string); ok && len(reported) <= 80 && strings.IndexFunc(reported, unicode.IsControl) < 0 {
+				s.v.ShipName = reported
+			}
 		}
 		numeric(data, "Rebuy", 0, 9e15, &s.v.RebuyCredits)
 		numeric(data, "HullValue", 0, 9e15, &s.v.HullValueCredits)
@@ -238,6 +275,26 @@ func (m *Model) ApplyEvent(key string, e journal.Event) {
 		if v, ok := data["Docked"].(bool); ok {
 			s.v.Docked = &v
 		}
+	case "Embark":
+		srv, _ := data["SRV"].(bool)
+		taxi, _ := data["Taxi"].(bool)
+		crew, _ := data["Multicrew"].(bool)
+		switch {
+		case srv:
+			s.v.Controlled = "srv"
+		case taxi:
+			s.v.Controlled = "taxi"
+		case crew:
+			s.v.Controlled = "multicrew"
+		default:
+			s.v.Controlled = "ship"
+		}
+	case "Disembark":
+		s.v.Controlled = "suit"
+	case "LaunchSRV":
+		s.v.Controlled = "srv"
+	case "DockSRV":
+		s.v.Controlled = "ship"
 	case "Shutdown":
 		s.v.Evidence = "waiting_game"
 		s.verified = false

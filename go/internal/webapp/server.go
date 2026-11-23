@@ -38,7 +38,8 @@ type Server struct {
 	closeErr                  error
 	sessions                  *sessionStore
 	socketMu                  sync.Mutex
-	sockets                   map[*websocket.Conn]struct{}
+	sockets                   map[*websocket.Conn]string // connection scope
+	account                   accountEpochState
 	closing                   bool
 	clientReady               chan struct{}
 	readyOnce                 sync.Once
@@ -93,7 +94,8 @@ func StartLocalWithOptions(ctx context.Context, assets fs.FS, opts Options) (*Se
 	server.navigationReady = make(chan struct{})
 	_, port, _ := net.SplitHostPort(listener.Addr().String())
 	server.sessions = newSessionStore(port, time.Now)
-	server.sockets = make(map[*websocket.Conn]struct{})
+	server.sockets = make(map[*websocket.Conn]string)
+	server.account.init()
 	server.http = &http.Server{Handler: server.handler(NewStaticHandler(assets)), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second}
 	if dir != "" {
 		manager, err := newRemote(server, assets, dir)

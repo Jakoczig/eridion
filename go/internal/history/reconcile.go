@@ -2,6 +2,7 @@ package history
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"sort"
@@ -23,11 +24,107 @@ type FactEvidence struct {
 	Fetched   string          `json:"fetchedAt"`
 	Stale     bool            `json:"stale"`
 	Value     json.RawMessage `json:"value"`
+	// Authority is the D0 tier ("frontier", "journal" or "third-party");
+	// Eligible is false for expired or invalid evidence kept as a fallback.
+	Authority string `json:"authority"`
+	Eligible  bool   `json:"eligible"`
 }
 type EffectiveFact struct {
 	Field string `json:"field"`
 	FactEvidence
 	Alternatives []FactEvidence `json:"alternatives"`
+}
+
+// currentFactEvidence selects, for every field and source, the single
+// chronologically best observation. Selection is per source; cross-source
+// authority is applied afterwards by EffectiveFacts. Each lookup uses the
+// provenance_observed index and stays bounded regardless of history size.
+func (s *Store) currentFactEvidence(ctx context.Context, fid, entity string, now time.Time) (map[string][]FactEvidence, error) {
+	var owner any
+	if fid != "" {
+		owner = fid
+	}
+	cutoff := observationCutoff(now)
+	values := map[string][]FactEvidence{}
+	// Enumerate only the field/source groups that have evidence (a covering
+	// index scan), then select each group's best observation with indexed
+	// lookups, so the number of queries tracks the evidence actually held.
+	groupRows, err := s.reader.QueryContext(ctx, "SELECT DISTINCT field,source FROM field_provenance WHERE commander_fid IS ? AND entity=? LIMIT 256", owner, entity)
+	if err != nil {
+		return nil, err
+	}
+	type group struct{ field, source string }
+	var groups []group
+	for groupRows.Next() {
+		var g group
+		if err = groupRows.Scan(&g.field, &g.source); err != nil {
+			groupRows.Close()
+			return nil, err
+		}
+		groups = append(groups, g)
+	}
+	err = groupRows.Err()
+	groupRows.Close()
+	if err != nil {
+		return nil, err
+	}
+	for _, g := range groups {
+		field, source := g.field, g.source
+		{
+			var key sql.NullString
+			if err := s.reader.QueryRowContext(ctx, "SELECT max(observed_key) FROM field_provenance WHERE commander_fid IS ? AND entity=? AND field=? AND source=? AND observed_key<>'' AND observed_key<=?", owner, entity, field, source, cutoff).Scan(&key); err != nil {
+				return nil, err
+			}
+			if !key.Valid {
+				// No plausible observation: fall back to the latest future or
+				// unknown-time evidence, which stays labelled by its observedAt.
+				if err := s.reader.QueryRowContext(ctx, "SELECT max(observed_key) FROM field_provenance WHERE commander_fid IS ? AND entity=? AND field=? AND source=?", owner, entity, field, source).Scan(&key); err != nil {
+					return nil, err
+				}
+				if !key.Valid {
+					continue
+				}
+			}
+			rows, err := s.reader.QueryContext(ctx, `SELECT p.source_ref,coalesce(p.observed_at,''),coalesce(p.fetched_at,''),p.value_json,coalesce(e.expires_at,''),coalesce(j.source_id,e.fetched_at,''),coalesce(j.byte_offset,0),coalesce(j.line_hash,e.content_hash,'') FROM field_provenance p LEFT JOIN journal_events j ON p.source='journal' AND j.event_id=cast(p.source_ref AS INTEGER) LEFT JOIN external_snapshots e ON p.source<>'journal' AND e.id=cast(p.source_ref AS INTEGER) AND p.source=e.provider WHERE p.commander_fid IS ? AND p.entity=? AND p.field=? AND p.source=? AND p.observed_key=? LIMIT 256`, owner, entity, field, source, key.String)
+			if err != nil {
+				return nil, err
+			}
+			var best FactEvidence
+			var bestObs observation
+			var bestExpires string
+			found := false
+			for rows.Next() {
+				var v FactEvidence
+				var raw, expires string
+				o := observation{Key: key.String}
+				if err = rows.Scan(&v.Reference, &v.Observed, &v.Fetched, &raw, &expires, &o.Source, &o.Offset, &o.Hash); err != nil {
+					rows.Close()
+					return nil, err
+				}
+				v.Source = source
+				v.Value = json.RawMessage(raw)
+				if !found || betterObservation(o, bestObs, cutoff) {
+					best, bestObs, bestExpires, found = v, o, expires, true
+				}
+			}
+			err = rows.Err()
+			rows.Close()
+			if err != nil {
+				return nil, err
+			}
+			if !found {
+				continue
+			}
+			expiry, e := time.Parse(time.RFC3339Nano, bestExpires)
+			best.Stale = e != nil || !now.Before(expiry)
+			if source == "journal" {
+				at, ok := validObservedAt(best.Observed, now)
+				best.Stale = !ok || now.Sub(at) > 5*time.Minute
+			}
+			values[field] = append(values[field], best)
+		}
+	}
+	return values, nil
 }
 
 var allowedFacts = map[string]bool{"name": true, "credits": true, "debt": true, "ranks": true, "squadron": true, "ships": true, "ship": true, "carrier": true, "inventory": true, "communityGoals": true, "market": true, "shipyard": true, "system": true, "station": true, "coordinates": true}
@@ -90,7 +187,7 @@ func (s *Store) SaveExternal(ctx context.Context, x ExternalFacts) error {
 	id, _ := result.LastInsertId()
 	for k, v := range x.Fields {
 		b, _ := json.Marshal(v)
-		if _, err = tx.ExecContext(ctx, "INSERT INTO field_provenance(entity,field,commander_fid,source,source_ref,observed_at,fetched_at,confidence,stale,value_json) VALUES(?,?,?,?,?,?,?,?,?,?)", x.Entity, k, null(x.FID), x.Provider, strconv.FormatInt(id, 10), observed, stamp(x.Fetched), "verified identity; remote snapshot", false, string(b)); err != nil {
+		if _, err = tx.ExecContext(ctx, "INSERT INTO field_provenance(entity,field,commander_fid,source,source_ref,observed_at,fetched_at,confidence,stale,value_json,observed_key) VALUES(?,?,?,?,?,?,?,?,?,?,?)", x.Entity, k, null(x.FID), x.Provider, strconv.FormatInt(id, 10), observed, stamp(x.Fetched), "verified identity; remote snapshot", false, string(b), observationKey(observed)); err != nil {
 			return err
 		}
 	}
@@ -101,83 +198,15 @@ func (s *Store) EffectiveFacts(ctx context.Context, fid, entity string, now time
 	if len(fid) > 128 || len(entity) > 64 {
 		return nil, errors.New("Invalid fact query")
 	}
-	rows, err := s.reader.QueryContext(ctx, `SELECT p.field,p.source,p.source_ref,coalesce(p.observed_at,''),coalesce(p.fetched_at,''),p.value_json,coalesce(e.expires_at,'') FROM field_provenance p LEFT JOIN external_snapshots e ON e.id=cast(p.source_ref AS INTEGER) AND p.source=e.provider WHERE p.id IN (SELECT max(id) FROM field_provenance WHERE coalesce(commander_fid,'')=? AND entity=? GROUP BY field,source) ORDER BY p.id DESC LIMIT 256`, fid, entity)
+	values, err := s.currentFactEvidence(ctx, fid, entity, now)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	values := map[string][]FactEvidence{}
-	seen := map[string]bool{}
-	for rows.Next() {
-		var field, expires, raw string
-		var v FactEvidence
-		if err = rows.Scan(&field, &v.Source, &v.Reference, &v.Observed, &v.Fetched, &raw, &expires); err != nil {
-			return nil, err
-		}
-		v.Value = json.RawMessage(raw)
-		key := field + "/" + v.Source
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		expiry, e := time.Parse(time.RFC3339Nano, expires)
-		v.Stale = e != nil || !now.Before(expiry)
-		if v.Source == "journal" {
-			at, e := time.Parse(time.RFC3339Nano, v.Observed)
-			v.Stale = e != nil || at.After(now.Add(5*time.Second)) || now.Sub(at) > 5*time.Minute
-		}
-		values[field] = append(values[field], v)
-	}
-	if err = rows.Err(); err != nil {
-		return nil, err
-	}
-	score := func(v FactEvidence) int {
-		n := 0
-		if !v.Stale {
-			n = 10
-		}
-		switch v.Source {
-		case "journal":
-			n += 3
-		case "frontier":
-			n += 2
-		case "inara":
-			n++
-		}
-		return n
-	}
 	out := []EffectiveFact{}
 	for field, a := range values {
-		sort.SliceStable(a, func(i, j int) bool { return score(a[i]) > score(a[j]) })
-		// Cache TTL describes retrieval freshness, not when the source witnessed
-		// a fact. An old journal observation remains evidence even after its
-		// advisory freshness window. Prefer the best external source only when
-		// it can prove a strictly newer observation; never use fetch time as proof.
-		local, remote := -1, -1
-		for i, v := range a {
-			if v.Source == "journal" {
-				local = i
-			} else if remote == -1 {
-				remote = i // Frontier retains priority among fresh external sources.
-			}
-		}
-		if local >= 0 {
-			observed, err := time.Parse(time.RFC3339Nano, a[local].Observed)
-			if err == nil && !observed.IsZero() && !observed.After(now.Add(5*time.Second)) {
-				winner := local
-				if remote >= 0 && !a[remote].Stale {
-					r, re := time.Parse(time.RFC3339Nano, a[remote].Observed)
-					f, fe := time.Parse(time.RFC3339Nano, a[remote].Fetched)
-					if re == nil && fe == nil && r.After(observed) && !r.After(now.Add(5*time.Second)) && !r.After(f.Add(5*time.Second)) {
-						winner = remote
-					}
-				}
-				// Move, rather than discard, all competing evidence.
-				chosen := a[winner]
-				copy(a[1:winner+1], a[:winner])
-				a[0] = chosen
-			}
-		}
+		// D0 authority: fresh Frontier, then journal, then one equal
+		// third-party tier. Competing evidence is moved, never discarded.
+		a = ResolveEvidence(a, now)
 		out = append(out, EffectiveFact{Field: field, FactEvidence: a[0], Alternatives: a[1:]})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Field < out[j].Field })

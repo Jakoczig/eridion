@@ -16,12 +16,13 @@ type stationSession struct {
 	Files                map[string]sidecar.Change
 }
 
-func (m *Manager) stationEventLocked(e journal.Event, phase journal.Phase) {
+// stationEventLocked consumes the payload Observe already decoded (with
+// UseNumber), so exact MarketIDs are preserved without a second decode.
+func (m *Manager) stationEventLocked(e journal.Event, phase journal.Phase, v map[string]any) {
 	if e.Type == "Fileheader" || e.Type == "LoadGame" || e.Type == "Shutdown" || e.Type == "Undocked" || e.Type == "StartJump" {
 		m.station = stationSession{Markers: map[string]journal.Event{}, Files: map[string]sidecar.Change{}}
 		return
 	}
-	v := object(e.Raw)
 	if e.Type == "Docked" && phase == journal.Live && m.identity != "" && validID(v["MarketID"]) && text(v["StationName"]) != "" && text(v["StarSystem"]) == m.system {
 		n, _ := v["MarketID"].(json.Number)
 		m.station = stationSession{Market: string(n), Name: text(v["StationName"]), System: m.system, Markers: map[string]journal.Event{}, Files: map[string]sidecar.Change{}}
@@ -42,7 +43,7 @@ func (m *Manager) ObserveSidecar(c sidecar.Change) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.closed || m.history == nil || m.station.Files == nil {
+	if m.closed || m.blocked || m.history == nil || m.station.Files == nil {
 		return
 	}
 	if !c.Valid {
@@ -68,7 +69,13 @@ func (m *Manager) publishStationLocked(kind string) {
 	if !valid || string(n) != m.station.Market || text(v["StationName"]) != m.station.Name || text(v["StarSystem"]) != m.station.System {
 		return
 	}
+	// Persist local evidence once, before any upload eligibility, so it is
+	// retained even when publication consent is off. A failure stops here:
+	// nothing is queued without its committed source evidence.
 	if err := m.history.SaveSidecar(m.fid, e, kind, c.Raw); err != nil {
+		if s != nil && s.config.Upload {
+			s.lastError = "Station source persistence failed"
+		}
 		return
 	}
 	if !strings.HasPrefix(m.gameVersion, "4.") || strings.ContainsAny(strings.ToLower(m.gameVersion), "abcdefghijklmnopqrstuvwxyz") || s == nil || !s.config.Upload || s.config.Paused || s.config.CommanderHash != m.identity {
@@ -107,10 +114,6 @@ func (m *Manager) publishStationLocked(kind string) {
 		total += len(q.body)
 	}
 	if len(s.queue) >= 64 || total > 2<<20 {
-		return
-	}
-	if err = m.history.SaveSidecar(m.fid, e, kind, c.Raw); err != nil {
-		s.lastError = "Station source persistence failed"
 		return
 	}
 	if err = m.history.CandidateOutcome(candidate.ID, "queued", "Fresh dock-matched sidecar authorized under exact recipient/category policy"); err != nil {

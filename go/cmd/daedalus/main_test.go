@@ -119,6 +119,8 @@ func TestNativeOfflineSmokeIgnoresJournalDirectory(t *testing.T) {
 		res.Body.Close()
 		req, _ = http.NewRequest("POST", url+"/owner/journal", strings.NewReader(`{"action":"status"}`))
 		req.Header.Set("Origin", strings.TrimSuffix(url, "/launcher"))
+		// Owner journal management is a launcher request.
+		req.Header.Set("X-Eridion-Scope", "launcher")
 		for _, cookie := range cookies {
 			req.AddCookie(cookie)
 		}

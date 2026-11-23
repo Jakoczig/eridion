@@ -26,6 +26,10 @@ type Projections struct {
 type WorkspaceView struct {
 	Parity   paritystate.View   `json:"parity"`
 	Activity activitystate.View `json:"activity"`
+	// Exosuit holds known suit/loadout equipment (available offline) and, only
+	// while the verified current-account Status reports the commander on
+	// foot, live suit telemetry.
+	Exosuit paritystate.ExosuitView `json:"exosuit"`
 }
 
 type projectionState struct {
@@ -65,9 +69,9 @@ func (s *Service) projectionLocked() Projections {
 	}
 	p.Exploration = s.views.exploration.View(fid, address)
 	if s.opts.EnableParity {
-		w := WorkspaceView{Parity: s.views.parity.View(fid), Activity: s.views.activity.View(fid)}
+		w := WorkspaceView{Parity: s.views.parity.View(fid), Activity: s.views.activity.View(fid), Exosuit: s.views.parity.Exosuit(fid)}
 		if s.summary.ImportInProgress {
-			w = WorkspaceView{Parity: paritystate.View{Evidence: "replaying"}, Activity: activitystate.View{Evidence: "replaying"}}
+			w = WorkspaceView{Parity: paritystate.View{Evidence: "replaying"}, Activity: activitystate.View{Evidence: "replaying"}, Exosuit: s.views.parity.Exosuit(fid)}
 		} else if s.summary.SourceState != "live" && s.summary.SourceState != "partial" && s.summary.SourceState != "parse_warning" {
 			w.Parity.Evidence = "stale_source"
 			w.Parity.Status = paritystate.StatusView{State: "stale_source"}
@@ -96,6 +100,15 @@ func (s *Service) projectionLocked() Projections {
 	}
 	if fid != s.active && p.Workspace != nil {
 		p.Workspace.Parity.Status = paritystate.StatusView{State: "different_account"}
+	}
+	if p.Workspace != nil {
+		// Live suit telemetry requires the final, account-checked Status: a
+		// stale source, another account, embarking or shutdown remove it while
+		// known equipment stays available.
+		p.Workspace.Exosuit.Live = nil
+		if st := p.Workspace.Parity.Status; st.State == "known" && st.OnFoot != nil && !s.summary.Cached {
+			p.Workspace.Exosuit.Live = paritystate.CloneExosuit(paritystate.ExosuitView{Live: st.OnFoot}).Live
+		}
 	}
 	if s.summary.Cached {
 		if p.Navigation.RouteState == "verified_last_known" || p.Navigation.RouteState == "verified" {
@@ -152,7 +165,7 @@ func (s *Service) sidecarProjectionLocked(c sidecar.Change) {
 	if s.opts.EnableParity {
 		s.views.parity.ApplySidecar(s.active, c)
 		if c.Kind == "Status" && !s.summary.ImportInProgress && s.summary.SourceState == "live" {
-			s.navigationContext.Status(s.active, s.views.parity.View(s.active).Status)
+			s.navigationContext.Status(s.active, s.views.parity.Status(s.active))
 		}
 		s.views.dirty = true
 	}
@@ -253,6 +266,7 @@ func cloneProjection(p Projections) Projections {
 		w := *p.Workspace
 		w.Parity = paritystate.Clone(w.Parity)
 		w.Activity = activitystate.Clone(w.Activity)
+		w.Exosuit = paritystate.CloneExosuit(w.Exosuit)
 		q.Workspace = &w
 	}
 	q.Ship = shipstate.Clone(p.Ship)

@@ -1,15 +1,10 @@
 import GoOperations, { operationPaths } from './go-operations'
-import { BGSTally, PrivateCommanderActivity, BuiltinModules } from './go-field-operations'
-import DataHistory from './go-data-history'
-import { ProviderDiagnostics } from './go-provider-settings'
+import { BGSTally, PrivateCommanderActivity } from './go-field-operations'
 import { useState, useEffect } from 'react'
 import Layout from './layout'
 import Panel from './panel'
 import PrimaryNavigation from './primary-navigation'
-import RemoteDisplays from './remote-displays'
-import GoJournalStatus from './go-journal-status'
 import GoTerminalSurvey from './go-terminal-survey'
-import { CompanionSettings } from './go-companion'
 import GoGalaxy from './go-galaxy'
 import GoSpansh from './go-spansh'
 import GoColonisation from './go-colonisation'
@@ -22,16 +17,15 @@ import * as navigation from '../lib/navigation-items'
 import { Icon, Badge, Clock, show } from './go-terminal-widgets'
 export default function GoTerminal (props) {
   useEffect(() => { if (typeof document !== 'undefined') document.title = 'ERIDION · ERID' }, [])
-  const [settings, setSettings] = useState(false)
   const [galaxyInspection, setGalaxyInspection] = useState(null)
-  useEffect(() => { let active = true; if (props.role === 'owner' && props.stage === 'G2E' && props.connected && props.ready) props.sendEvent('getGoAccounts').then(v => { if (active && v.choiceRequired) window.location.replace('/launcher') }).catch(() => {}); return () => { active = false } }, [props.role, props.stage, props.connected, props.ready, props.sendEvent])
+  useEffect(() => { let active = true; if (props.role === 'owner' && props.stage === 'G2E' && props.connected && props.ready) props.sendEvent('getGoAccountGate').then(v => { if (active && v.choiceRequired) window.location.replace('/launcher') }).catch(() => {}); return () => { active = false } }, [props.role, props.stage, props.connected, props.ready, props.sendEvent])
   const [display, setDisplay] = useState({ visible: false })
   const { value: flight } = useGoProjection({ ...props, connected: props.connected && props.stage === 'G2E' }, 'getGoNavigationContext', 'goNavigationContextChanged')
   const { value: plotted } = useGoProjection({ ...props, connected: props.connected && props.stage === 'G2E' }, 'getGoNavigation', 'goNavigationChanged')
   const controllerInput = { mode: flight?.navigation?.mode, episode: flight?.navigation?.episode, fresh: flight?.navigation?.fresh, routeKnown: !!plotted?.hops?.length, policy: flight?.policy, disconnected: !props.connected || !props.ready }
   useEffect(() => { setDisplay(previous => transition(previous, controllerInput)) }, [flight, plotted, props.connected, props.ready])
   const manual = event => { if (event.target.closest('.secondary-navigation, header button') || event.target.closest('[data-primary-navigation]')) setDisplay(previous => transition(previous, { ...controllerInput, manual: true })) }
-  const [communityVersion, setCommunityVersion] = useState(0)
+  const [communityVersion] = useState(0)
   const path = props.path === '/cmdr/field' || props.path?.startsWith('/controls') ? '/cmdr/overview' : props.path === '/' || props.path === '/nav' ? '/nav/map' : props.path === '/ship' ? '/ship/status' : props.path === '/exploration' ? '/exploration/system' : props.path === '/eng' ? '/eng/blueprints' : props.path === '/cmdr' ? '/cmdr/overview' : props.path === '/mining' ? '/mining/status' : props.path === '/missions' ? '/missions/overview' : props.path === '/trade' ? '/trade/routes' : props.path
   const group = path.split('/')[1]; const page = path.split('/')[2] || ''
   const menus = { nav: navigation.NavPanelNavItems, exploration: navigation.ExplorationPanelNavItems, ship: navigation.ShipPanelNavItems, eng: navigation.EngineeringPanelNavItems, cmdr: navigation.CmdrPanelNavItems, missions: navigation.MissionsPanelNavItems, mining: navigation.MiningPanelNavItems, trade: navigation.TradePanelNavItems }
@@ -41,7 +35,7 @@ export default function GoTerminal (props) {
   const { value: ship } = useGoProjection(props, 'getGoShip', 'goShipChanged')
   if (group === 'cmdr' && props.stage === 'G2E') items.push({ name: 'Colonisation', icon: 'scan', url: '/cmdr/colonisation', active: page === 'colonisation' })
   let content
-  if (props.stage === 'G2E' && path === '/missions/local-activity') content = <section className='go-page'><h2>Local activity</h2>{props.role === 'owner' ? <PrivateCommanderActivity {...props} /> : <p>Private commander history is available to the local owner only.</p>}<p>Mission and Powerplay observations remain in their respective pages.</p></section>
+  if (props.stage === 'G2E' && path === '/missions/local-activity') content = <section className='go-page'><h2>Local activity</h2><PrivateCommanderActivity {...props} /><p>Mission and Powerplay observations remain in their respective pages.</p></section>
   else if (props.stage === 'G2E' && operationPaths.includes(path)) content = <GoOperations key={path} {...props} path={path} />
   else if (path === '/cmdr/colonisation' && props.stage === 'G2E') content = <GoColonisation {...props} />
   else if (path === '/nav/neutron-plotter' && props.stage === 'G2E') content = <GoSpansh {...props} />
@@ -53,7 +47,7 @@ export default function GoTerminal (props) {
     content = (
       <>
         <GoTerminalRoute {...props} context={flight?.navigation} />
-        {props.nativePreview && props.role === 'owner' && <div className='go-native-survey'><GoTerminalSurvey {...props} communityVersion={communityVersion} path='/exploration/system' />{props.stage === 'G2E' && <GoParity {...props} path='/ship/modules' />}</div>}
+        {props.nativePreview && <div className='go-native-survey'><GoTerminalSurvey {...props} communityVersion={communityVersion} path='/exploration/system' />{props.stage === 'G2E' && <GoParity {...props} path='/ship/modules' />}</div>}
       </>
     )
   } else {
@@ -79,25 +73,14 @@ export default function GoTerminal (props) {
         <div className='go-terminal__status'>
           <Clock />
           <span className={props.connected && props.ready ? 'text-success' : 'text-danger'} role='status'><Icon name='signal' /> {props.connected ? (props.ready ? 'SERVICE READY' : 'CONNECTING') : 'DISCONNECTED'}</span>
-          <Badge>{props.role === 'owner' ? 'LOCAL OWNER' : 'READ-ONLY DISPLAY'}</Badge>
-          <button type='button' aria-label={props.role === 'owner' ? 'Owner settings' : 'Display status'} aria-expanded={settings} onClick={() => setSettings(s => !s)}><Icon name='settings' /></button>
+          <Badge>{props.role === 'owner' ? 'MAIN DISPLAY' : 'PAIRED DISPLAY'}</Badge>
         </div>
         <PrimaryNavigation native />
       </header>
       <div className='go-terminal__telemetry'><span><Icon name='location-filled' /> {summary?.currentSystem || 'Awaiting local journal'}</span><span className='text-muted'>{summary?.stage ? 'G2N' : props.stage || 'G2D'} · {summary?.cached ? 'LAST KNOWN / ' : ''}{summary?.stage || summary?.sourceState || 'waiting'} · local-first · explicit provider consent</span><span><Icon name='ship' /> {ship?.shipType || 'Ship unknown'} · Fuel {show(ship?.fuelMainT, 'T')}</span></div>
       <Layout connected={props.connected} ready={props.ready} className='go-terminal__layout'>
-        <Panel temporaryLabels={path !== '/nav/galaxy' && !display.visible} navigation={items} className='go-terminal__panel'><div className='go-content'>{display.visible ? <section className='go-fsd' aria-label='Automatic FSD display'><div className='go-page__heading'><h2>{display.finished ? 'Jump ended' : flight?.navigation?.mode === 'charge' ? 'FSD charging' : 'Hyperspace jump'}</h2><button onClick={() => setDisplay(previous => transition(previous, { ...controllerInput, manual: true }))}>Return to previous screen</button></div>{flight?.policy?.mapDuringFSD && (flight.policy.galaxyMap !== false || flight.policy.localAtlas !== false) ? <GoGalaxy inspection={galaxyInspection} onInspection={setGalaxyInspection} policy={flight?.policy} context={flight?.navigation} route={plotted} {...props} compact /> : <GoTerminalRoute {...props} compact context={flight?.navigation} />}</section> : content}</div></Panel>
+        <Panel temporaryLabels={path !== '/nav/galaxy' && !display.visible} navigation={items} className='go-terminal__panel'><div className='go-content'>{display.visible ? <section className='go-fsd' aria-label='Automatic FSD display'><div className='go-page__heading'><h2>{display.finished ? 'Jump ended' : flight?.navigation?.mode === 'charge' ? 'FSD charging' : 'Hyperspace jump'}</h2><button onClick={() => setDisplay(previous => transition(previous, { ...controllerInput, manual: true }))}>Return to previous screen</button></div>{flight?.policy?.mapDuringFSD && (flight.policy.galaxyMap !== false || flight.policy.localAtlas !== false) ? <GoGalaxy inspection={galaxyInspection} onInspection={setGalaxyInspection} policy={flight?.policy} context={flight?.navigation} route={plotted} {...props} compact onViewSystem={() => setDisplay(previous => transition(previous, { ...controllerInput, manual: true }))} /> : <GoTerminalRoute {...props} compact context={flight?.navigation} />}</section> : content}</div></Panel>
       </Layout>
-      {settings && (
-        <aside className='go-settings inspector' aria-label='Display settings'>
-          <div className='go-page__heading'><h2>{props.role === 'owner' ? 'Owner settings' : 'Display status'}</h2><button aria-label='Close settings' onClick={() => setSettings(false)}>Ä‚—</button></div>
-          <GoJournalStatus {...props} stage={props.stage || 'G2D'} />
-          {props.role === 'owner' && props.stage === 'G2E' && <CompanionSettings {...props} onProvidersChange={() => setCommunityVersion(v => v + 1)} />}
-          {props.role === 'owner' && <details><summary>Advanced local tools</summary><DataHistory {...props} /><BuiltinModules {...props} /><PrivateCommanderActivity {...props} /><details className='go-data-providers'><summary>Provider diagnostics</summary><ProviderDiagnostics {...props} /></details></details>}
-          {props.role === 'owner' && <RemoteDisplays />}
-          {props.role !== 'owner' && <p className='text-muted'>Pairing, journal directories and device permissions are controlled by the local owner.</p>}
-        </aside>
-      )}
     </div>
   )
 }

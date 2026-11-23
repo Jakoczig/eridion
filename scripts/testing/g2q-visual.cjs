@@ -21,7 +21,7 @@ async function main () {
     }
   })
   await c.call('Network.enable'); await c.call('Fetch.enable', { patterns: [{ urlPattern: '*' }] })
-  const rpc = (name, message = {}) => evaluate(`new Promise((resolve,reject)=>{const w=new WebSocket(location.origin.replace('http:','ws:'));const timer=setTimeout(()=>{w.close();reject(Error('fixture RPC timeout'))},30000);w.onopen=()=>w.send(JSON.stringify({requestId:'g2q',name:${JSON.stringify(name)},message:${JSON.stringify(message)}}));w.onmessage=e=>{const r=JSON.parse(e.data);if(r.requestId==='g2q'){clearTimeout(timer);w.close();r.error?reject(Error(r.error)):resolve(r.message)}}})`)
+  const rpc = (name, message = {}) => evaluate(`new Promise((resolve,reject)=>{const w=new WebSocket(location.origin.replace('http:','ws:')+'/?scope=launcher');const timer=setTimeout(()=>{w.close();reject(Error('fixture RPC timeout'))},30000);w.onopen=()=>w.send(JSON.stringify({requestId:'g2q',name:${JSON.stringify(name)},message:${JSON.stringify(message)}}));w.onmessage=e=>{const r=JSON.parse(e.data);if(r.requestId==='g2q'){clearTimeout(timer);w.close();r.error?reject(Error(r.error)):resolve(r.message)}}})`)
   const shot = async name => { const r = await c.call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }); await fs.writeFile(path.join(output, name + '.png'), Buffer.from(r.data, 'base64')) }
   try {
     host = await fixture('G2E', '', path.join(root, 'tests/testdata/g2g')); origin = host.url
@@ -31,7 +31,12 @@ async function main () {
       if (Math.abs(geometry.ratio - 0.2) > 0.015) throw Error('Tile viewport stretched by outer projection CSS: ' + JSON.stringify(geometry))
       if (!await evaluate('!!document.querySelector(".go-galaxy-route")')) throw Error('Default route missing')
       if (await evaluate('document.body.textContent.includes("Show Route")')) throw Error('Obsolete route control')
-      if (await evaluate('document.querySelectorAll("[data-marker=current]").length') !== 3) throw Error('Current-system markers missing')
+      // The current-system marker needs the navigation context, a separate
+      // asynchronous reply from the host (getGoNavigationContext or its
+      // broadcast). Wait for exactly three markers, bounded, then assert.
+      const countMarkers = () => evaluate('document.querySelectorAll("[data-marker=current]").length')
+      const markers = await waitFor(async () => (await countMarkers()) === 3 ? 3 : 0, 15000).catch(countMarkers)
+      if (markers !== 3) throw Error('Current-system markers missing: ' + JSON.stringify({ markers, path: await evaluate('location.pathname'), context: await rpc('getGoNavigationContext').then(v => ({ current: v?.navigation?.current?.name || null, fresh: v?.navigation?.fresh, mode: v?.navigation?.mode })).catch(e => e.message), accounts: await rpc('getGoAccounts').then(v => ({ choiceRequired: v.choiceRequired, defaultRequired: v.defaultRequired, recovery: v.recovery, cards: v.cards.length })).catch(e => e.message) }))
       await shot('overlays-' + name); report.pages.push({ name, dpr, geometry, alwaysVisibleRoute: true })
     }
     // Mount the exact canvas module in a tiny test-only hook host. Real DOM,

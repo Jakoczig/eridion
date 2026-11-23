@@ -42,11 +42,10 @@ func TestG2FViewersCannotEnableOrTriggerProvider(t *testing.T) {
 	defer c.CloseNow()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	for _, name := range []string{"setGoCommunityEnabled", "refreshGoCommunity"} {
-		r := callRPC(t, ctx, c, name)
-		if len(r["error"]) == 0 {
-			t.Fatal("viewer provider action allowed", name)
-		}
+	// D1: enabling the provider is launcher management; an explicit refresh
+	// is an ordinary gameplay lookup available on every trusted display.
+	if r := callRPC(t, ctx, c, "setGoCommunityEnabled"); string(r["error"]) != `"`+launcherOnlyError+`"` {
+		t.Fatal("paired display changed a launcher setting", string(r["error"]))
 	}
 	reply := callRPC(t, ctx, c, "getGoCommunity")
 	if len(reply["error"]) > 0 {

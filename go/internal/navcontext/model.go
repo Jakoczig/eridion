@@ -18,10 +18,15 @@ type Point struct {
 	Name        string      `json:"name"`
 	Address     string      `json:"address"`
 	Coordinates *[3]float64 `json:"coordinates,omitempty"`
-	Security    string      `json:"security,omitempty"`
-	Powers      []string    `json:"powers,omitempty"`
-	Powerplay   string      `json:"powerplay,omitempty"`
-	Source      string      `json:"source"`
+	// CoordinatesSource is set only when the coordinates did not come from
+	// the point's own Source (for example EDSM coordinates for a journal
+	// point without StarPos), with their retrieval time.
+	CoordinatesSource    string   `json:"coordinatesSource,omitempty"`
+	CoordinatesFetchedAt string   `json:"coordinatesFetchedAt,omitempty"`
+	Security             string   `json:"security,omitempty"`
+	Powers               []string `json:"powers,omitempty"`
+	Powerplay            string   `json:"powerplay,omitempty"`
+	Source               string   `json:"source"`
 }
 type View struct {
 	Current *Point  `json:"current"`

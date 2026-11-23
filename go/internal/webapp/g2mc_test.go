@@ -35,9 +35,14 @@ func TestG2MCViewerSnapshotAllowlistAndPrivateLedger(t *testing.T) {
 	if !strings.Contains(body, "iron") || strings.Contains(body, "SYNTHETIC-A") || strings.Contains(body, `"Fixture A"`) || strings.Contains(body, "Journal.") || strings.Contains(body, "FileID") {
 		t.Fatal("startup workspace allowlist changed", body)
 	}
-	for _, name := range []string{"getGoBGSTally", "getGoCommanderOverview", "exportGoBGS"} {
-		if len(callRPC(t, ctx, c, name)["error"]) == 0 {
-			t.Fatal("viewer accessed private commander data", name)
+	// D1: the paired display receives the same selected-account gameplay data
+	// as the main display; unknown RPCs stay rejected.
+	for _, name := range []string{"getGoBGSTally", "getGoCommanderOverview"} {
+		if r := callRPC(t, ctx, c, name); strings.Contains(string(r["error"]), "owner") || string(r["error"]) == `"`+launcherOnlyError+`"` {
+			t.Fatal("paired display denied gameplay data", name, string(r["error"]))
 		}
+	}
+	if len(callRPC(t, ctx, c, "exportGoBGS")["error"]) == 0 {
+		t.Fatal("unknown RPC accepted")
 	}
 }

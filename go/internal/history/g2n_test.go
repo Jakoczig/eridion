@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+// Task 15 / D0: a fresh Frontier inventory that lists a previously sold,
+// reused ID establishes current ownership again (the sale stays in history).
 func TestG2NFrontierOnlyFleetHasBoundedCompletePaging(t *testing.T) {
 	s := operationFixture(t, `{"event":"Loadout","ShipID":1,"Ship":"asp","ShipName":"Fixture","Modules":[]}`, `{"event":"ShipyardSell","SellShipID":2}`)
 	ships := []any{}
@@ -28,7 +30,7 @@ func TestG2NFrontierOnlyFleetHasBoundedCompletePaging(t *testing.T) {
 			t.Fatal("unbounded page")
 		}
 		for _, r := range p.Rows {
-			if seen[r.Entity] || r.Entity == "2" {
+			if seen[r.Entity] || r.State == "sold" {
 				t.Fatal("duplicate or sold ship", r.Entity)
 			}
 			seen[r.Entity] = true
@@ -42,8 +44,8 @@ func TestG2NFrontierOnlyFleetHasBoundedCompletePaging(t *testing.T) {
 			break
 		}
 	}
-	if len(seen) != 74 {
-		t.Fatalf("fleet dead end: %d/74", len(seen))
+	if len(seen) != 75 || !seen["2"] {
+		t.Fatalf("fleet dead end: %d/75", len(seen))
 	}
 	other, e := s.Operations(context.Background(), "OTHER", q)
 	if e != nil || len(other.Rows) > 0 {

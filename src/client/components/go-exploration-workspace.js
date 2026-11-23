@@ -5,7 +5,7 @@ export default function GoExplorationWorkspace (props) {
   return (
     <>
       {route ? <GoNavigation {...props} enhanced /> : <GoSurveyExplorer {...props} biology={props.path === '/exploration/biologicals'} listOnly={props.path === '/nav/list'} />}
-      {route && props.nativePreview && props.role === 'owner' && <GoSurveyExplorer {...props} />}
+      {route && props.nativePreview && <GoSurveyExplorer {...props} />}
     </>
   )
 }

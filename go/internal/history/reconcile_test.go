@@ -8,7 +8,10 @@ import (
 	"time"
 )
 
-func TestRemoteFetchCannotReplaceNewerWitnessedJournalFact(t *testing.T) {
+// Confirmed D0 supersedes the earlier journal-first rule: fresh validated
+// Frontier wins regardless of its (usually unknown) observation time, while an
+// impossible observation time or an expired snapshot falls back to the journal.
+func TestFrontierFreshnessDecidesAuthorityOverJournal(t *testing.T) {
 	at := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
 	now := at.Add(6 * time.Minute)
 	for _, tc := range []struct {
@@ -17,9 +20,9 @@ func TestRemoteFetchCannotReplaceNewerWitnessedJournalFact(t *testing.T) {
 		expired  bool
 		want     string
 	}{
-		{"unknown observation", time.Time{}, false, "journal"},
-		{"older observation", at.Add(-time.Hour), false, "journal"},
-		{"same observation", at, false, "journal"},
+		{"unknown observation", time.Time{}, false, "frontier"},
+		{"older observation", at.Add(-time.Hour), false, "frontier"},
+		{"same observation", at, false, "frontier"},
 		{"newer observation", at.Add(time.Minute), false, "frontier"},
 		{"future observation", now.Add(time.Hour), false, "journal"},
 		{"expired newer snapshot", at.Add(time.Minute), true, "journal"},

@@ -7,7 +7,7 @@ import (
 	"encoding/gob"
 )
 
-const CacheFormat = "6f40f18dd22595f6891fa925237571cad5ac5f8fca3b710432adca0cff1350c8"
+const CacheFormat = "332475aab9f02b7686f7dee986972724f4d23d167e03699cc8c67b63c38ebbc0"
 
 type persistedstate struct {
 	FV        View
@@ -16,11 +16,13 @@ type persistedstate struct {
 	FId       string
 	FOffset   int64
 	FSequence uint64
+	FMemo     View
+	FMemoID   string
 }
 
 func (v state) GobEncode() ([]byte, error) {
 	var b bytes.Buffer
-	err := gob.NewEncoder(&b).Encode(persistedstate{FV: v.v, FVerified: v.verified, FFile: v.file, FId: v.id, FOffset: v.offset, FSequence: v.sequence})
+	err := gob.NewEncoder(&b).Encode(persistedstate{FV: v.v, FVerified: v.verified, FFile: v.file, FId: v.id, FOffset: v.offset, FSequence: v.sequence, FMemo: v.memo, FMemoID: v.memoID})
 	return b.Bytes(), err
 }
 func (v *state) GobDecode(raw []byte) error {
@@ -34,6 +36,8 @@ func (v *state) GobDecode(raw []byte) error {
 	v.id = p.FId
 	v.offset = p.FOffset
 	v.sequence = p.FSequence
+	v.memo = p.FMemo
+	v.memoID = p.FMemoID
 	return nil
 }
 

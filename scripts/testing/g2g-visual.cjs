@@ -25,7 +25,7 @@ async function main () {
       await c.call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: factor, mobile: false })
       await navigate('/launcher', 'NATIVE COMPANION')
       await evaluate('Array.from(document.querySelectorAll(".go-launcher-actions button")).find(b=>b.textContent==="Settings").click()')
-      await waitFor(() => evaluate('document.querySelectorAll(".go-companion-settings>button").length===5'))
+      await waitFor(() => evaluate('document.querySelectorAll(".go-companion-settings>button").length===6'))
       await evaluate('Array.from(document.querySelectorAll(".go-companion-settings>button")).find(b=>b.textContent==="Credits").focus()')
       await c.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' })
       await c.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
@@ -67,7 +67,7 @@ async function main () {
       await screenshot('galaxy-' + viewport); report.pages.push({ viewport, page: 'galaxy', projections })
     }
     // Use the ordinary owner-authenticated WebSocket, with no Wails bindings.
-    await evaluate('window.g2gRPC=async(name,message)=>{const session=await fetch(\'/auth/session\',{method:\'POST\'});if(!session.ok)throw Error(\'owner session\');return new Promise((resolve,reject)=>{const ws=new WebSocket(location.origin.replace(\'http\',\'ws\'));const id=\'g2g-check\';ws.onopen=()=>ws.send(JSON.stringify({name,message,requestId:id}));ws.onmessage=e=>{const r=JSON.parse(e.data);if(r.requestId===id){ws.close();r.error?reject(Error(r.error)):resolve(r.message)}};ws.onerror=reject})}')
+    await evaluate('window.g2gRPC=async(name,message)=>{const session=await fetch(\'/auth/session\',{method:\'POST\'});if(!session.ok)throw Error(\'owner session\');return new Promise((resolve,reject)=>{const ws=new WebSocket(location.origin.replace(\'http\',\'ws\')+\'/?scope=launcher\');const id=\'g2g-check\';ws.onopen=()=>ws.send(JSON.stringify({name,message,requestId:id}));ws.onmessage=e=>{const r=JSON.parse(e.data);if(r.requestId===id){ws.close();r.error?reject(Error(r.error)):resolve(r.message)}};ws.onerror=reject})}')
     await evaluate('g2gRPC(\'setGoCompanion\',{charge:true,jump:true,restore:true,owner:true,allViewers:false,devices:[],closeMode:\'tray\'})')
     await navigate('/nav/galaxy', 'GALAXY MAP'); host.child.stdin.write('jump\n')
     await waitFor(() => evaluate('!!document.querySelector(\'[aria-label="Automatic FSD display"]\')'))

@@ -233,6 +233,11 @@ function CmdrPanelNavItems (activePanel) {
       url: '/cmdr/overview'
     },
     {
+      name: 'Exosuit',
+      icon: 'shield',
+      url: '/cmdr/exosuit'
+    },
+    {
       name: 'Session',
       icon: 'trending-up-chart',
       url: '/cmdr/session'

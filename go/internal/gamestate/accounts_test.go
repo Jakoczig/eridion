@@ -81,7 +81,7 @@ func TestLegacyPairingProofUsesCompletePersistedCommanderSet(t *testing.T) {
 			}
 			stop()
 			seen := make(chan bool, 20)
-			next, e := NewService(Options{StorageDir: profile, Directory: dir, EnableParity: true, Discovery: journal.DiscoveryOptions{Roots: []string{}}, PollInterval: 5 * time.Millisecond, DisplayAccount: func(got string, safe bool) {
+			next, e := NewService(Options{StorageDir: profile, Directory: dir, EnableParity: true, Discovery: journal.DiscoveryOptions{Roots: []string{}}, PollInterval: 5 * time.Millisecond, DisplayAccount: func(got string, safe bool, _ bool) {
 				if got == fid {
 					select {
 					case seen <- safe:

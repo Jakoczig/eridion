@@ -83,6 +83,8 @@ function patchWebSocket () {
   // time; it runs later when the React SocketProvider mounts.
   const origSend = WebSocket.prototype.send
   WebSocket.prototype.send = function (data) {
+    // Disabled profiling must not add a JSON pass to every frame.
+    if (!recording) return origSend.call(this, data)
     try {
       const parsed = JSON.parse(data)
       if (parsed.requestId) {
@@ -99,6 +101,7 @@ function patchWebSocket () {
   Object.defineProperty(WebSocket.prototype, 'onmessage', {
     set (handler) {
       const wrapped = function (event) {
+        if (!recording) return handler.call(this, event)
         try {
           const parsed = JSON.parse(event.data)
           if (parsed.requestId) {

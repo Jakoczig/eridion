@@ -31,6 +31,10 @@ func (m *Manager) Read(ctx context.Context, id, kind, query string, pages ...int
 	}
 	cacheKey := fmt.Sprintf("%s/%s/%d", kind, query, page)
 	m.mu.Lock()
+	if m.blocked {
+		m.mu.Unlock()
+		return nil, errors.New("Choose a commander in the launcher before provider access")
+	}
 	s := m.states[id]
 	cap := m.cap(id)
 	if m.closed || (m.opts.RequireHistory && m.history == nil) || s == nil || !s.config.Read || s.config.Paused || cap.Gate != "" || !slices.Contains(cap.Read, kind) {

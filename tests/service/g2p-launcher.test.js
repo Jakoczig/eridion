@@ -29,6 +29,23 @@ test('single-account settings always show the active verified card and only laun
     try { h.html(); await h.flush(); const html = h.html(); assert.match(html, /Fixture A/); assert.match(html, /Cobra/); assert.match(html, /Sol/); assert.equal(html.includes('Change portrait'), launcher); assert.doesNotMatch(html, /type="file"/) } finally { h.unmount() }
   }
 })
+test('launcher shows the default commander without a select step and asks once when ambiguous', async () => {
+  const cards = [{ fid: 'FIXTURE-A', name: 'Fixture A', active: false, default: false }, { fid: 'FIXTURE-B', name: 'Fixture B', active: true, default: true }]
+  let h = harness('go-accounts', () => ({ settings: { multiple: false, defaultFID: 'FIXTURE-B' }, cards, choiceRequired: false, defaultRequired: false }))
+  h.props.cardsOnly = true
+  try { h.html(); await h.flush(); const html = h.html(); assert.match(html, /aria-label="Default commander"/); assert.match(html, /Fixture B/); assert.doesNotMatch(html, /Fixture A/); assert.doesNotMatch(html, /<button|<article/) } finally { h.unmount() }
+  const requests = []
+  const ambiguous = { settings: { multiple: false }, cards: cards.map(c => ({ ...c, default: false })), choiceRequired: true, defaultRequired: true }
+  h = harness('go-accounts', () => ambiguous)
+  h.props.cardsOnly = true
+  h.props.sendEvent = async (name, data) => { requests.push({ name, data }); return name === 'setGoAccounts' ? { settings: { multiple: false, defaultFID: data.default }, cards, choiceRequired: false, defaultRequired: false } : ambiguous }
+  const previous = global.window; global.window = { dispatchEvent: () => {}, location: { assign: () => {} } }
+  try {
+    h.html(); await h.flush(); const html = h.html(); assert.match(html, /Choose default commander/); assert.match(html, /Fixture A/); assert.match(html, /Fixture B/)
+    const choose = h.elements('button').find(b => b.props.children === 'Use as default'); await choose.props.onClick()
+    const save = requests.find(r => r.name === 'setGoAccounts'); assert.deepEqual(save.data, { multiple: false, selected: '', default: 'FIXTURE-A' })
+  } finally { h.unmount(); global.window = previous }
+})
 test('compact provider cards expose no requests or credential fields until expanded and are absent for viewers', async () => {
   const h = harness('go-provider-settings', () => [{ capability: { id: 'frontier', read: ['profile'], upload: [] }, config: {}, state: 'disabled' }])
   try {
