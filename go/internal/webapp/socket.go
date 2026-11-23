@@ -106,6 +106,9 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 	var providerRequested atomic.Bool
 	var contextRequested atomic.Bool
 	var spatialRequested atomic.Bool
+	// communityBase is the consent revision (+1; 0 = never requested) this
+	// connection last observed; set when community data are served.
+	var communityBase atomic.Uint64
 	var navRequested, surveyRequested, navDelivered, surveyDelivered atomic.Bool
 	var shipRequested, shipDelivered atomic.Bool
 	var workspaceRequested, workspaceDelivered atomic.Bool
@@ -174,6 +177,17 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 						if revision != spatialRevision {
 							spatialRevision = revision
 							if send(map[string]any{"name": "goSpatialChanged", "message": map[string]any{"revision": revision}}) != nil {
+								return
+							}
+						}
+					}
+					// Audit F8: an EDSM consent change made in the launcher
+					// reaches every open community consumer at once.
+					if base := communityBase.Load(); base != 0 && s.community != nil {
+						revision, enabled := s.community.Revision()
+						if revision+1 != base {
+							communityBase.Store(revision + 1)
+							if send(map[string]any{"name": "goCommunityChanged", "message": map[string]any{"enabled": enabled}}) != nil {
 								return
 							}
 						}
@@ -493,6 +507,10 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 				s.launcherOnce.Do(func() { close(s.launcherReady) })
 			}
 		case "getGoCommunity", "refreshGoCommunity", "setGoCommunityEnabled":
+			if s.community != nil {
+				revision, _ := s.community.Revision()
+				communityBase.Store(revision + 1)
+			}
 			if s.community == nil || s.game == nil {
 				response["error"] = "Community enrichment unavailable"
 				break

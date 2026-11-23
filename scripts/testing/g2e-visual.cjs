@@ -3,7 +3,7 @@ const fs = require('node:fs/promises')
 const sync = require('node:fs')
 const path = require('node:path')
 const { execFileSync } = require('node:child_process')
-const { fixture, browser, waitFor, delay, pageTextReady } = require('./g2d-visual.cjs')
+const { fixture, browser, waitFor, delay, pageTextReady, cdp } = require('./g2d-visual.cjs')
 const root = path.resolve(__dirname, '../..')
 
 function backendSample (pid) {
@@ -135,15 +135,35 @@ async function main () {
       await screenshot('community-map-' + viewport)
       report.pages.push({ viewport, page: 'community-map', provenance: true, stations: true })
     }
-    await navigate('/launcher', 'NATIVE COMPANION'); await evaluate('Array.from(document.querySelectorAll(".go-launcher-actions button")).find(b=>b.textContent==="Settings").click()'); await waitFor(() => evaluate('!!document.querySelector(".go-companion-settings")')); await evaluate('Array.from(document.querySelectorAll(".go-companion-settings>button")).find(b=>b.textContent==="Advanced").click()')
-    await waitFor(() => evaluate('!!document.querySelector(\'.go-data-providers\')'))
-    await evaluate('document.querySelector(\'.go-data-providers\').open=true')
-    await waitFor(() => evaluate('document.querySelector(\'[aria-label="Optional EDSM enrichment"]\')?.textContent.includes(\'Disable EDSM lookups\')'))
-    await evaluate('Array.from(document.querySelectorAll(\'[aria-label="Optional EDSM enrichment"] button\')).find(b=>b.textContent===\'Disable EDSM lookups\').click()')
-    await waitFor(() => evaluate('Array.from(document.querySelectorAll(\'[aria-label="Optional EDSM enrichment"] button\')).some(b=>b.textContent.includes(\'Enable\'))'))
-    await navigate('/nav/map', 'SYSTEM CARTOGRAPHY')
-    await waitFor(() => evaluate("!document.querySelector('[aria-label=\"Inspect Fixture Community Planet\"]')&&!document.querySelector('.go-station-inspector,.go-chart__stations')"))
-    report.community = { mockOnly: true, ownerDisableClears: true }
+    // Audit F8: EDSM is disabled in the launcher (its own page, launcher-only
+    // settings) while this page keeps the community map open. The open map
+    // must drop community data live, well before its 15 s poll.
+    if (!await evaluate('!!document.querySelector(\'[aria-label="Inspect Fixture Community Planet"]\')')) throw new Error('Community data not shown on the open map before the change')
+    const target = await (await fetch(`http://127.0.0.1:${b.port}/json/new?${encodeURIComponent(origin + '/launcher')}`, { method: 'PUT' })).json()
+    const launcher = cdp(target.webSocketDebuggerUrl); await launcher.ready
+    launcher.on(event => {
+      if (event.method === 'Runtime.exceptionThrown') report.errors.push(event.params.exceptionDetails.exception?.description || event.params.exceptionDetails.text)
+      if (event.method === 'Fetch.requestPaused') {
+        const p = event.params; const allowed = p.request.url.startsWith(origin + '/') || p.request.url.startsWith('data:')
+        if (!allowed) report.blockedRequests.push(p.request.url)
+        launcher.call(allowed ? 'Fetch.continueRequest' : 'Fetch.failRequest', allowed ? { requestId: p.requestId } : { requestId: p.requestId, errorReason: 'BlockedByClient' }).catch(() => {})
+      }
+    })
+    await launcher.call('Runtime.enable'); await launcher.call('Fetch.enable', { patterns: [{ urlPattern: '*' }] })
+    const inLauncher = async expression => { const r = await launcher.call('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text); return r.result.value }
+    await waitFor(() => inLauncher('!!document.body&&document.body.innerText.toUpperCase().includes("NATIVE COMPANION")&&Array.from(document.querySelectorAll(".go-launcher-actions button")).some(b=>b.textContent==="Settings")'))
+    await inLauncher('Array.from(document.querySelectorAll(".go-launcher-actions button")).find(b=>b.textContent==="Settings").click()'); await waitFor(() => inLauncher('!!document.querySelector(".go-companion-settings")')); await inLauncher('Array.from(document.querySelectorAll(".go-companion-settings>button")).find(b=>b.textContent==="Advanced").click()')
+    await waitFor(() => inLauncher('!!document.querySelector(\'.go-data-providers\')'))
+    await inLauncher('document.querySelector(\'.go-data-providers\').open=true')
+    await waitFor(() => inLauncher('document.querySelector(\'[aria-label="Optional EDSM enrichment"]\')?.textContent.includes(\'Disable EDSM lookups\')'))
+    await inLauncher('Array.from(document.querySelectorAll(\'[aria-label="Optional EDSM enrichment"] button\')).find(b=>b.textContent===\'Disable EDSM lookups\').click()')
+    await waitFor(() => inLauncher('Array.from(document.querySelectorAll(\'[aria-label="Optional EDSM enrichment"] button\')).some(b=>b.textContent.includes(\'Enable\'))'))
+    const disabledAt = Date.now()
+    await waitFor(() => evaluate("!document.querySelector('[aria-label=\"Inspect Fixture Community Planet\"]')&&!document.querySelector('.go-station-inspector,.go-chart__stations')"), 5000)
+    report.liveInvalidationMs = Date.now() - disabledAt
+    await screenshot('community-cleared-live')
+    launcher.socket.close(); await fetch(`http://127.0.0.1:${b.port}/json/close/${target.id}`).catch(() => {})
+    report.community = { mockOnly: true, ownerDisableClears: true, liveOpenMap: true }
     if (report.errors.length || report.blockedRequests.length) throw new Error('Runtime errors or unexpected external requests')
     report.passed = true
     await fs.writeFile(path.join(output, 'verification.json'), JSON.stringify(report, null, 2))

@@ -101,3 +101,38 @@ func TestAuditSearchMissingCoordinates(t *testing.T) {
 type transportFunc func(*http.Request) (*http.Response, error)
 
 func (f transportFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// Audit F8 / G2E: an already-open gameplay display learns of an EDSM consent
+// change made in the launcher without waiting for its 15-second poll, so it
+// can drop community data immediately.
+func TestAuditCommunityConsentChangeReachesOpenDisplays(t *testing.T) {
+	s, _ := searchServer(t, true, "9007199254740993")
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	main := dialScoped(t, s, "")
+	// Mark the connection as a community consumer, as the map does.
+	if r := rpcWithMessage(t, ctx, main, "getGoCommunity", map[string]any{}); len(r["error"]) != 0 {
+		t.Fatal(string(r["error"]))
+	}
+	if err := s.community.SetEnabled(false); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		_, raw, err := main.Read(ctx)
+		if err != nil {
+			t.Fatal("no goCommunityChanged after the consent change:", err)
+		}
+		var frame struct {
+			Name    string `json:"name"`
+			Message struct {
+				Enabled bool `json:"enabled"`
+			} `json:"message"`
+		}
+		if json.Unmarshal(raw, &frame) == nil && frame.Name == "goCommunityChanged" {
+			if frame.Message.Enabled {
+				t.Fatal("change reported as enabled")
+			}
+			return
+		}
+	}
+}

@@ -158,6 +158,14 @@ func (m *Manager) viewLocked(name, address string) View {
 	}
 	return v
 }
+
+// Revision identifies the current consent state: it changes on every
+// enable/disable, so open displays can drop community data immediately.
+func (m *Manager) Revision() (uint64, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.generation, m.enabled
+}
 func (m *Manager) View(name, address string) View {
 	m.mu.Lock()
 	defer m.mu.Unlock()
