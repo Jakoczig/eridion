@@ -13,15 +13,17 @@ import (
 	"time"
 )
 
+// Restricted (PowerPlay) and commander-dependent items are omitted; unknown
+// items now suppress the snapshot (TestAuditStationInventoryComplete).
 func TestEDDNStationSchemasSanitizeAndPreserveExactMarketID(t *testing.T) {
 	m := &Manager{uploader: "fixture", gameVersion: "4.1", gameBuild: "fixture"}
-	for kind, items := range map[string]string{"Market": `"Items":[{"Name":"gold","MeanPrice":1,"BuyPrice":2,"Stock":3,"StockBracket":1,"SellPrice":4,"Demand":5,"DemandBracket":1,"Producer":true,"Rare":false,"id":123}]`, "Shipyard": `"PriceList":[{"ShipType":"SideWinder"},{"ShipType":"CobraMkIV"}]`, "Outfitting": `"Items":[{"Name":"int_hyperdrive_size5_class5"},{"Name":"Hpt_PulseLaserBurst_Special"},{"Name":"PRIVATE_DECAL"}]`} {
+	for kind, items := range map[string]string{"Market": `"Items":[{"Name":"gold","MeanPrice":1,"BuyPrice":2,"Stock":3,"StockBracket":1,"SellPrice":4,"Demand":5,"DemandBracket":1,"Producer":true,"Rare":false,"id":123}]`, "Shipyard": `"PriceList":[{"ShipType":"SideWinder"},{"ShipType":"CobraMkIV"}]`, "Outfitting": `"Items":[{"Name":"int_hyperdrive_size5_class5"},{"Name":"int_shieldgenerator_size3_class5_strong"},{"Name":"PRIVATE_DECAL"}]`} {
 		raw := `{"timestamp":"2026-11-15T12:00:00Z","StarSystem":"Fixture","StationName":"Fixture Port","MarketID":18446744073709551615,"Commander":"PRIVATE",` + items + `}`
 		out, err := m.stationPayload(kind, object([]byte(raw)))
 		if err != nil {
 			t.Fatal(kind, err)
 		}
-		if !strings.Contains(string(out), "18446744073709551615") || strings.Contains(string(out), "PRIVATE") || strings.Contains(string(out), "Producer") || strings.Contains(string(out), "CobraMkIV") || strings.Contains(string(out), "Special") {
+		if !strings.Contains(string(out), "18446744073709551615") || strings.Contains(string(out), "PRIVATE") || strings.Contains(string(out), "Producer") || strings.Contains(string(out), "CobraMkIV") || strings.Contains(string(out), "_Strong") {
 			t.Fatal("station fields escaped", string(out))
 		}
 	}
@@ -187,5 +189,56 @@ func TestPerfStationSingleDecodeAndSave(t *testing.T) {
 				t.Fatalf("station evidence save attempts = %d (stored %d), want %d", attempts, stored, tc.wantAttempts)
 			}
 		})
+	}
+}
+
+// Task 8 / F09: EDDN station snapshots carry every ordinary public module and
+// ship (they used to keep only eight core-internal families and a fixed list
+// of 20 hulls), omit commander/rank-dependent items, keep the exact MarketID,
+// and are suppressed rather than truncated when an item cannot be classified.
+func TestAuditStationInventoryComplete(t *testing.T) {
+	m := &Manager{uploader: "fixture", gameVersion: "4.1", gameBuild: "fixture"}
+	head := `{"timestamp":"2026-11-15T12:00:00Z","StarSystem":"Fixture","StationName":"Fixture Port","MarketID":18446744073709551615,`
+	modules := func(raw []byte) []string {
+		var p struct {
+			Message struct {
+				MarketID json.Number `json:"marketId"`
+				Modules  []string    `json:"modules"`
+				Ships    []string    `json:"ships"`
+			} `json:"message"`
+		}
+		d := json.NewDecoder(strings.NewReader(string(raw)))
+		d.UseNumber()
+		if err := d.Decode(&p); err != nil {
+			t.Fatal(err)
+		}
+		if p.Message.MarketID != "18446744073709551615" {
+			t.Fatalf("MarketID not exact: %s", p.Message.MarketID)
+		}
+		return append(p.Message.Modules, p.Message.Ships...)
+	}
+	out, err := m.stationPayload("Outfitting", object([]byte(head+`"Items":[{"id":128049513,"Name":"hpt_chafflauncher_tiny","BuyPrice":1},{"id":128064272,"Name":"int_shieldgenerator_size3_class5","BuyPrice":1},{"id":128666676,"Name":"int_fuelscoop_size1_class5","BuyPrice":1},{"id":128049381,"Name":"hpt_pulselaser_fixed_small","BuyPrice":1},{"id":128049292,"Name":"dolphin_armour_grade1","BuyPrice":1},{"id":128671325,"Name":"int_shieldgenerator_size3_class5_strong","BuyPrice":1},{"id":128672317,"Name":"int_planetapproachsuite","BuyPrice":1},{"Name":"paintjob_cobramkiii_default_52","BuyPrice":1}]}`)))
+	if err != nil {
+		t.Fatal("outfitting:", err)
+	}
+	got := strings.Join(modules(out), ",")
+	if got != "Hpt_ChaffLauncher_Tiny,Int_ShieldGenerator_Size3_Class5,Int_FuelScoop_Size1_Class5,Hpt_PulseLaser_Fixed_Small,Dolphin_Armour_Grade1" {
+		t.Fatalf("outfitting modules = %s", got)
+	}
+	out, err = m.stationPayload("Shipyard", object([]byte(head+`"PriceList":[{"id":128049291,"ShipType":"dolphin","ShipPrice":1},{"id":128816567,"ShipType":"krait_mkii","ShipPrice":1},{"ShipType":"SideWinder","ShipPrice":1},{"ShipType":"CobraMkIV","ShipPrice":1}]}`)))
+	if err != nil {
+		t.Fatal("shipyard:", err)
+	}
+	if got = strings.Join(modules(out), ","); got != "Dolphin,Krait_MkII,SideWinder" {
+		t.Fatalf("shipyard ships = %s", got)
+	}
+	// One unclassifiable item suppresses the whole category snapshot.
+	for kind, items := range map[string]string{
+		"Outfitting": `"Items":[{"id":128049513,"Name":"hpt_chafflauncher_tiny"},{"id":999999999,"Name":"hpt_future_weapon"}]`,
+		"Shipyard":   `"PriceList":[{"ShipType":"SideWinder"},{"ShipType":"Future_Hull"}]`,
+	} {
+		if out, err := m.stationPayload(kind, object([]byte(head+items+`}`))); err == nil || !strings.Contains(err.Error(), "not classified") {
+			t.Fatalf("%s with an unknown item published (%v): %s", kind, err, out)
+		}
 	}
 }

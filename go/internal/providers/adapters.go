@@ -306,10 +306,13 @@ func (m *Manager) encode(id string, e journal.Event, v map[string]any, cred Cred
 		case "Statistics":
 			eventName = "setCommanderCredits"
 			bank, ok := v["Bank_Account"].(map[string]any)
-			if !ok || !validID(bank["Current_Wealth"]) {
+			// Task 8 / F10: Current_Wealth is total assets, not cash. Send
+			// one coherent snapshot: cash and loan witnessed by this
+			// session's LoadGame plus assets; suppress it otherwise.
+			if !ok || !validID(bank["Current_Wealth"]) || m.sessionCash == "" || m.sessionLoan == "" {
 				return fail()
 			}
-			data = map[string]any{"commanderCredits": bank["Current_Wealth"]}
+			data = map[string]any{"commanderCredits": m.sessionCash, "commanderAssets": bank["Current_Wealth"], "commanderLoan": m.sessionLoan}
 		default:
 			return fail()
 		}

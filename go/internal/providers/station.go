@@ -3,9 +3,10 @@ package providers
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"github.com/Jakoczig/eridion/go/internal/catalog"
 	"github.com/Jakoczig/eridion/go/internal/journal"
 	"github.com/Jakoczig/eridion/go/internal/sidecar"
-	"regexp"
 	"strings"
 	"time"
 )
@@ -98,6 +99,9 @@ func (m *Manager) publishStationLocked(kind string) {
 	payload, err := m.stationPayload(kind, v)
 	if err != nil {
 		s.lastError = "Station message lacked verified public fields; not queued"
+		if strings.Contains(err.Error(), "not classified") {
+			s.lastError = err.Error() // honest suppression reason (Task 8 / F09)
+		}
 		return
 	}
 	key := hash("eddn/station/" + m.identity + "/" + string(c.Raw))
@@ -125,8 +129,6 @@ func (m *Manager) publishStationLocked(kind string) {
 	default:
 	}
 }
-
-var publicOutfitting = regexp.MustCompile(`(?i)^int_(engine|powerplant|hyperdrive|powerdistributor|lifesupport|sensors|fueltank|cargorack)_size[1-8]_class[1-5]$`)
 
 func (m *Manager) stationPayload(kind string, v map[string]any) ([]byte, error) {
 	fail := func() ([]byte, error) { return nil, errors.New("Unsupported station snapshot") }
@@ -165,43 +167,51 @@ func (m *Manager) stationPayload(kind string, v map[string]any) ([]byte, error) 
 			return fail()
 		}
 		msg["commodities"] = out
-	case "Shipyard":
-		schema = "shipyard/2"
-		items, _ = v["PriceList"].([]any)
-		if len(items) > 256 {
-			return fail()
-		}
-		ships := []string{}
-		seen := map[string]bool{}
-		safe := map[string]bool{"sidewinder": true, "adder": true, "anaconda": true, "asp": true, "asp_scout": true, "cobramkiii": true, "diamondback": true, "diamondbackxl": true, "eagle": true, "ferdelance": true, "hauler": true, "independant_trader": true, "orca": true, "python": true, "type6": true, "type7": true, "type9": true, "viper": true, "viper_mkiv": true, "vulture": true}
-		for _, item := range items {
-			o, _ := item.(map[string]any)
-			name := text(o["ShipType"])
-			if safe[strings.ToLower(name)] && !seen[name] {
-				ships = append(ships, name)
-				seen[name] = true
-			}
-		}
-		if len(ships) == 0 {
-			return fail()
-		}
-		msg["ships"] = ships
-	case "Outfitting":
+	case "Shipyard", "Outfitting":
+		// Task 8 / F09: every item is classified against the reviewed
+		// catalogue; ordinary public stock is published in full, commander-
+		// or rank-dependent items are omitted, and one unclassifiable item
+		// suppresses the whole snapshot instead of publishing a truncated one.
+		catalogKind, nameKey, listKey, field, limit := "outfitting", "Name", "Items", "modules", 2048
 		schema = "outfitting/2"
+		if kind == "Shipyard" {
+			catalogKind, nameKey, listKey, field, limit = "shipyard", "ShipType", "PriceList", "ships", 256
+			schema = "shipyard/2"
+		}
+		items, _ = v[listKey].([]any)
+		if len(items) > limit {
+			return fail()
+		}
 		out := []string{}
 		seen := map[string]bool{}
+		unknown := 0
 		for _, item := range items {
 			o, _ := item.(map[string]any)
-			name := text(o["Name"])
-			if publicOutfitting.MatchString(name) && !seen[name] {
-				out = append(out, name)
-				seen[name] = true
+			name := text(o[nameKey])
+			if name == "" {
+				return fail()
 			}
+			id := ""
+			if n, ok := o["id"].(json.Number); ok {
+				id = n.String()
+			}
+			canonical, permitted, known := catalog.PublicInventorySymbol(catalogKind, id, name)
+			if !known {
+				unknown++
+				continue
+			}
+			if permitted && !seen[canonical] {
+				out = append(out, canonical)
+				seen[canonical] = true
+			}
+		}
+		if unknown > 0 {
+			return nil, fmt.Errorf("%s snapshot not published: %d item(s) not classified by the bundled catalogue; a partial inventory is never sent", kind, unknown)
 		}
 		if len(out) == 0 {
 			return fail()
 		}
-		msg["modules"] = out
+		msg[field] = out
 	default:
 		return fail()
 	}

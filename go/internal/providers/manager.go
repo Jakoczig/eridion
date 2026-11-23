@@ -28,7 +28,10 @@ type Manager struct {
 	// blocked is the explicit "no commander chosen yet" state: no account
 	// namespace, observation, upload, read or authorization runs until the
 	// launcher (or single-commander adoption) pins a real commander.
-	blocked                                        bool
+	blocked bool
+	// sessionCash/sessionLoan are the current session's witnessed LoadGame
+	// Credits and Loan (Task 8 / F10); empty when unknown.
+	sessionCash, sessionLoan                       json.Number
 	accountConfigs                                 map[string]map[string]storedConfig
 	hostCooldown                                   map[string]time.Time
 	station                                        stationSession
@@ -413,6 +416,7 @@ func (m *Manager) Observe(e journal.Event, phase journal.Phase) {
 			m.station = stationSession{}
 			m.fid = ""
 			m.name = ""
+			m.sessionCash, m.sessionLoan = "", ""
 			m.system = ""
 			m.position = nil
 			m.address = nil
@@ -425,6 +429,7 @@ func (m *Manager) Observe(e journal.Event, phase journal.Phase) {
 		m.identity = ""
 		m.fid = ""
 		m.name = ""
+		m.sessionCash, m.sessionLoan = "", ""
 		m.system = ""
 		m.position = nil
 		m.address = nil
@@ -441,12 +446,19 @@ func (m *Manager) Observe(e journal.Event, phase journal.Phase) {
 			m.fid = e.FID
 			m.name = text(v["Commander"])
 		}
+		m.sessionCash, m.sessionLoan = "", ""
+		if cash, ok := v["Credits"].(json.Number); ok && e.FID != "" && validID(cash) {
+			if loan, ok := v["Loan"].(json.Number); ok && validID(loan) {
+				m.sessionCash, m.sessionLoan = cash, loan
+			}
+		}
 		m.odyssey, _ = v["Odyssey"].(bool)
 		return
 	}
 	if e.Type == "Shutdown" {
 		m.identity = ""
 		m.fid = ""
+		m.sessionCash, m.sessionLoan = "", ""
 		return
 	}
 	if e.Type == "FSDJump" || e.Type == "Location" || e.Type == "CarrierJump" {
