@@ -70,7 +70,12 @@ Interpretation notes:
 | Working set, end / max | 429.0 MB | 428.4 MB | 430.2 MB | |
 | Processes in tree | 8 | 8 | 8 | of which 6 WebView2 |
 
-Working-set growth during the 5-minute window was below 4 MB in every run. The launcher idles at about 5 % of one core; where that CPU goes (Go service polling vs. renderer timers such as the launcher's 5 s `getGoLauncher` poll and the clock) was not attributed in this baseline.
+Working-set growth during the 5-minute window was below 4 MB in every run, measured from the reading taken right after the 60 s warm-up. Measured from the first 5 s sample instead, growth was up to 8.4 MB (run 1: 421.8 → 430.2 MB). Windows working set is not the same measure as Linux RSS or private bytes. The launcher idles at about 5 % of one core; where that CPU goes (Go service polling vs. renderer timers such as the launcher's 5 s `getGoLauncher` poll and the clock) was not attributed in this baseline.
+
+## Scope of this baseline (audit F10, 23 November 2026)
+
+- The binary measured is `dbe3de1`. Later commits on the branch (journal-rank resolution, account epochs and connection scopes, Exosuit history retention, default-commander validation) were not re-measured. A candidate comparison must re-measure the baseline head and the candidate on the same machine.
+- Only Windows was measured. The fixture hashes above reproduce exactly on Linux with the generator (checked 23 November 2026); no Linux timing was taken.
 
 ## Not measured in this baseline
 
