@@ -214,10 +214,24 @@ func (v *ExosuitView) upsertLoadout(l SuitLoadout) {
 
 // applyExosuit reduces explicit Odyssey suit/loadout events and reports
 // whether the event was one of them.
+//
+// ExosuitEventTypes is the complete set of journal events the Exosuit reducer
+// consumes. History retains their payloads (bounded journal lines) so that a
+// rebuild from durable history reproduces the known equipment.
+var ExosuitEventTypes = []string{"SuitLoadout", "SwitchSuitLoadout", "CreateSuitLoadout", "RenameSuitLoadout", "DeleteSuitLoadout", "LoadoutEquipModule", "LoadoutRemoveModule", "BuySuit", "SellSuit", "UpgradeSuit", "UpgradeWeapon"}
+
+// IsExosuitEvent reports whether kind is one of ExosuitEventTypes.
+func IsExosuitEvent(kind string) bool {
+	for _, k := range ExosuitEventTypes {
+		if k == kind {
+			return true
+		}
+	}
+	return false
+}
+
 func applyExosuit(v *ExosuitView, kind string, at time.Time, d map[string]any) bool {
-	switch kind {
-	case "SuitLoadout", "SwitchSuitLoadout", "CreateSuitLoadout", "RenameSuitLoadout", "DeleteSuitLoadout", "LoadoutEquipModule", "LoadoutRemoveModule", "BuySuit", "SellSuit", "UpgradeSuit", "UpgradeWeapon":
-	default:
+	if !IsExosuitEvent(kind) {
 		return false
 	}
 	if v.State == "" {

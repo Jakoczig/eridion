@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/Jakoczig/eridion/go/internal/journal"
+	"github.com/Jakoczig/eridion/go/internal/paritystate"
 	"math"
 	"strconv"
 	"strings"
@@ -84,6 +85,11 @@ func relevant(kind string) bool {
 		return true
 	}
 	if strings.HasPrefix(kind, "Powerplay") {
+		return true
+	}
+	// Exosuit equipment evidence (Task 14): without these payloads a rebuild
+	// from history cannot reproduce known suits and loadouts.
+	if paritystate.IsExosuitEvent(kind) {
 		return true
 	}
 	switch kind {
