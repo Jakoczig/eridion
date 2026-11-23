@@ -347,3 +347,40 @@ func TestAuditLatestSnapshotWinsBeyondWindow(t *testing.T) {
 		}
 	}
 }
+
+// Task 17 / F24: Inara rank evidence reaches the shared representation with
+// its own progress (including fractional percentages); progress is
+// attributed only to the level of the source that reported it.
+func TestAuditInaraRanksWithProgress(t *testing.T) {
+	now := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	saveFacts(t, s, "inara", time.Time{}, now, map[string]any{
+		"ranks":        []map[string]string{{"name": "combat", "value": "5"}, {"name": "exploration", "value": "13"}},
+		"rankProgress": []map[string]string{{"name": "combat", "value": "23.45"}, {"name": "exploration", "value": "100"}},
+	})
+	facts, _ := s.EffectiveFacts(context.Background(), "SYNTHETIC-A", "commander", now.Add(time.Minute))
+	combat := rankByCategory(ResolveRanks(facts), "combat")
+	explore := rankByCategory(ResolveRanks(facts), "explore")
+	if combat == nil || combat.Rank != "5" || combat.Source != "inara" || combat.Progress == nil || *combat.Progress != "23.45" || combat.ProgressSource != "inara" {
+		t.Fatalf("Inara combat = %+v", combat)
+	}
+	if explore == nil || explore.Rank != "13" || explore.Progress == nil || *explore.Progress != "100" {
+		t.Fatalf("Inara explore = %+v", explore)
+	}
+	// A fresh Frontier level wins; Inara's progress belongs to Inara's level
+	// and is not attached to the Frontier level, even when it is equal.
+	saveFacts(t, s, "frontier", time.Time{}, now.Add(time.Second), map[string]any{"ranks": map[string]string{"combat": "8", "explore": "13"}})
+	facts, _ = s.EffectiveFacts(context.Background(), "SYNTHETIC-A", "commander", now.Add(time.Minute))
+	combat = rankByCategory(ResolveRanks(facts), "combat")
+	explore = rankByCategory(ResolveRanks(facts), "explore")
+	if combat == nil || combat.Rank != "8" || combat.Source != "frontier" || combat.Progress != nil {
+		t.Fatalf("Frontier combat = %+v", combat)
+	}
+	if explore == nil || explore.Source != "frontier" || explore.Progress != nil {
+		t.Fatalf("Frontier explore inherited Inara progress: %+v", explore)
+	}
+}

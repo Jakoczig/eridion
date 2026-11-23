@@ -1,7 +1,9 @@
 package history
 
 import (
+	"bytes"
 	"encoding/json"
+	"math/big"
 	"sort"
 	"strconv"
 	"strings"
@@ -215,6 +217,49 @@ func rankLevels(raw json.RawMessage) map[string]string {
 	return out
 }
 
+// progressLevels normalizes rank progress percentages (journal Progress
+// object, or a provider's name/value list) to category -> exact percent text
+// within 0..100, including fractional values.
+func progressLevels(raw json.RawMessage) map[string]string {
+	out := map[string]string{}
+	put := func(name string, v any) {
+		c := rankCategory(name)
+		text := ""
+		switch x := v.(type) {
+		case json.Number:
+			text = x.String()
+		case string:
+			text = x
+		case float64:
+			text = strconv.FormatFloat(x, 'f', -1, 64)
+		}
+		r, ok := new(big.Rat).SetString(text)
+		if c == "" || !ok || r.Sign() < 0 || r.Cmp(big.NewRat(100, 1)) > 0 {
+			return
+		}
+		out[c] = text
+	}
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.UseNumber()
+	var any0 any
+	if d.Decode(&any0) != nil {
+		return out
+	}
+	switch x := any0.(type) {
+	case map[string]any:
+		for k, v := range x {
+			put(k, v)
+		}
+	case []any:
+		for _, item := range x {
+			o, _ := item.(map[string]any)
+			name, _ := o["name"].(string)
+			put(name, o["value"])
+		}
+	}
+	return out
+}
+
 func factCandidates(facts []EffectiveFact, field string) []FactEvidence {
 	for _, f := range facts {
 		if f.Field == field {
@@ -240,11 +285,17 @@ func ResolveRanks(facts []EffectiveFact) []ResolvedRank {
 	}
 	var progress map[string]string
 	var progressKey string
+	// Progress reported by another source belongs to that source's snapshot
+	// (same stored reference as its rank levels; Task 17 / F24).
+	snapshotProgress := map[string]map[string]string{}
 	for _, c := range factCandidates(facts, "rankProgress") {
 		if c.Source == "journal" {
-			progress, progressKey = rankLevels(c.Value), observationKey(c.Observed)
-			break
+			if progress == nil {
+				progress, progressKey = progressLevels(c.Value), observationKey(c.Observed)
+			}
+			continue
 		}
+		snapshotProgress[c.Source+"/"+c.Reference] = progressLevels(c.Value)
 	}
 	out := []ResolvedRank{}
 	for _, category := range rankCategories {
@@ -254,7 +305,10 @@ func ResolveRanks(facts []EffectiveFact) []ResolvedRank {
 				continue
 			}
 			r := ResolvedRank{Category: category, Rank: level, Source: c.Source, Authority: c.Authority, ObservedAt: c.Observed, FetchedAt: c.Fetched, Stale: !c.Eligible || c.Stale}
-			if p, ok := progress[category]; ok && journalLevels[category] == level && progressKey >= journalRankKey {
+			if p, ok := snapshotProgress[c.Source+"/"+c.Reference][category]; ok && c.Source != "journal" {
+				value := p
+				r.Progress, r.ProgressSource = &value, c.Source
+			} else if p, ok := progress[category]; ok && journalLevels[category] == level && progressKey >= journalRankKey {
 				value := p
 				r.Progress, r.ProgressSource = &value, "journal"
 			}

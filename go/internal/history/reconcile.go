@@ -134,7 +134,7 @@ func (s *Store) currentFactEvidence(ctx context.Context, fid, entity string, now
 	return values, nil
 }
 
-var allowedFacts = map[string]bool{"name": true, "credits": true, "debt": true, "ranks": true, "squadron": true, "ships": true, "ship": true, "carrier": true, "inventory": true, "communityGoals": true, "market": true, "shipyard": true, "system": true, "station": true, "coordinates": true}
+var allowedFacts = map[string]bool{"name": true, "credits": true, "debt": true, "ranks": true, "rankProgress": true, "squadron": true, "ships": true, "ship": true, "carrier": true, "inventory": true, "communityGoals": true, "market": true, "shipyard": true, "system": true, "station": true, "coordinates": true}
 
 // Fact inspection is not a calculation API. Preserve every journal number as
 // its original decimal text, including identifiers nested in goals/squadrons.

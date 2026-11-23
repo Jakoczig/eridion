@@ -233,7 +233,7 @@ func (m *Manager) encode(id string, e journal.Event, v map[string]any, cred Cred
 						}
 						d["rankProgress"] = f / 100
 					} else {
-						if f > 14 || f != math.Trunc(f) {
+						if f > float64(inaraRankBound(name)) || f != math.Trunc(f) {
 							return fail()
 						}
 						d["rankValue"] = n
