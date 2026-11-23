@@ -143,3 +143,38 @@ On `c04bd1c` (Linux, Go 1.26.10, Node 22.22.1): `npm ci`, `lint:security`, `lint
 - Task 14: suit rows stored as `{}` by earlier builds are not enriched from the original journals; Frontier suit normalization; multicrew and live-claim removal tests.
 - Tasks 15/16 test and catalogue gaps listed in the audit; Tasks 3, 4, 6–10, 17–24 not started; PERF-06–10 not started.
 - Owner acceptance of slices 1–3 is pending; no status here is "owner acceptance confirmed".
+
+## Navigation correctness (slice 4, 23 November 2026)
+
+Directive: resolve the G2Q Windows failure, then Task 3, Task 4 and the G2E coverage gap (audit F8). Each change began with a regression that failed on the previous code. Browser gates ran locally this time (Chromium 131 headless; this host has no usable Chromium sandbox, so the local launcher adds `--no-sandbox`; CI keeps the sandboxed launch). Toolchain: Go 1.26.10, Node 22.22.1 locally.
+
+| ID | Status | Commit | Change and evidence |
+| --- | --- | --- | --- |
+| G2Q Windows failure (run 45229400143) | targeted checks passed | `998b294` | Cause: the current-system marker needs the navigation context, a separate asynchronous reply; the gate counted markers right after the map text appeared. Reproduced exactly by delaying only navigation-context WebSocket frames by 3 s (same `markers:0` error with the host reporting Fixture Alpha). The application recovers once the reply arrives; the gate now waits (condition-polled, 15 s bound) for exactly three markers, then asserts three, with diagnostics. Verified at 1366×768 and 680×580@2: passes normally and with a 3 s delay; still fails when the context never arrives. |
+| Task 3 / F03 (cascade) | targeted checks passed | `936d514` | Legacy rules (`.go-terminal .go-galaxy.is-compact .go-galaxy-projections{display:block}` and two `.go-terminal .go-fsd` rules) out-ranked the unified grid. Measured during FSD charge at 1366×768 before the fix: `display:block`, X/Y below the viewport, Y/Z 6817 px tall. Legacy rules now apply only to `:not(.go-g3d)`. Red→green: `g3e-visual.cjs` geometry assertions. |
+| Task 3 / F04 (XYZ controls) | targeted checks passed | `936d514` | Controls follow the selected Local inspection, not data readiness; loading, unavailable/point-budget (backend notice) and request failure are shown separately; only a complete reply for the current slice renders; superseded replies ignored; camera math unchanged. Red→green: `g3e-map.test.js` "XYZ controls survive pending and over-budget Local data; stale slices never render" (0 controls while pending before). |
+| Task 3 — View System during FSD | targeted checks passed | `936d514` | View System inside the overlay dismisses the episode through the manual-dismissal policy before navigating; verified in the browser (search inside FSD, then `/nav/map` with no overlay). |
+| Task 4 / F05 | targeted checks passed | `6574aae` | `community.Manager.Resolve(name, expectedAddress)` on the existing lookup path (consent, cache, cooldown, identity) refuses a different ID64; `systemView` fills only missing coordinates for the same address, labelled `coordinatesSource`/`coordinatesFetchedAt`; passive reads cache-only. Client: named hit without coordinates continues to the authorized lookup; results are bound to their query (edit, failure, superseded reply, reply after unmount); stale cached data labelled with date. Red→green: `TestAuditSearchResolveBindsIdentity`, `TestAuditSearchMissingCoordinates`, two `g3e-map.test.js` search tests. |
+| F8 — G2E live invalidation | targeted checks passed | `1a67d8f` | The open map kept community stations until its 15 s poll when EDSM was disabled from the launcher window. The host pushes `goCommunityChanged` (consent state only) from the socket's one-second loop to community consumers; `useCommunity` reloads. G2E opens the launcher as a second page and requires the open map to clear within 5 s (red on the previous build; 153 ms after). Red→green also: `TestAuditCommunityConsentChangeReachesOpenDisplays`. |
+
+FSD geometry measured by `g3e-visual.cjs` (X/Z, X/Y, Y/Z in CSS px; identical for charge and jump at each size):
+
+| Viewport | X/Z | X/Y | Y/Z |
+| --- | --- | --- | --- |
+| 1366×768 | 502.2 × 502.0 | 502.2 × 40.2 | 40.2 × 502.0 |
+| 1920×1080 | 791.1 × 790.8 | 791.1 × 63.3 | 63.3 × 790.8 |
+| 820×1180 | 440.7 × 440.7 | 440.7 × 35.2 | 35.2 × 440.7 |
+| 680×580 | 351.0 × 351.3 | 351.0 × 28.1 | 28.1 × 351.3 |
+
+The normal map passes the same grid/square/aligned checks at five sizes, Galaxy and Local rectangles are identical, an XYZ edit inside FSD keeps the rectangles, and FSD without a route keeps the grid. Screenshots and the geometry JSON are written to `temp/g3e-visual/` and uploaded by CI as the G3E artifact.
+
+Gate updates made for intended new behaviour (not weakened): G3D/G3E idle-request checks wait for the fitted slice's Local data rather than the axis text (now visible while loading); the visual fixture gained a `charge` command (synthetic Status with FSD charging); the shared harness exports its CDP client and debugging port.
+
+Local verification on `1a67d8f`: `npm test` 204/204, `lint:security`, `lint:go-assets`, `build:go-assets`, gofmt clean, `go vet` and `go test` on all packages except `internal/desktop`/`cmd/daedalus` (no GTK locally), `-race` on `community`, `navcontext`, `webapp`; browser gates G2E, G2G, G2H, G2Q, G3C, G3D and G3E passed locally. Final CI for this slice: see PR #29.
+
+Limitations and open items after slice 4:
+
+- Paired-display FSD behaviour is covered by the existing display-controller policy tests, not by a browser gate.
+- Task 3's local-only/density-only map policy combinations are exercised only partly (both-off and both-on in G3E).
+- Launcher-only authority remains a per-connection scope declared by the trusted local frontend, not cryptographic per-window authentication.
+- Main-display-only automatic community refresh is unchanged; explicit refresh and lookups are equal on main and paired displays.
