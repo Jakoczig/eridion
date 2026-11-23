@@ -210,3 +210,22 @@ func TestAuditOwnerHTTPNeedsLauncherScope(t *testing.T) {
 		t.Fatalf("launcher journal status = %d", status)
 	}
 }
+
+// A session boundary of the same commander (the display briefly has no
+// commander, e.g. a new Fileheader) is not a commander switch; a different
+// known commander is, even across such a gap.
+func TestAuditAccountEpochAdvancesOnlyForADifferentCommander(t *testing.T) {
+	var a accountEpochState
+	a.init()
+	for _, step := range []struct {
+		fid     string
+		advance bool
+	}{{"", false}, {"SYNTHETIC-A", false}, {"", false}, {"SYNTHETIC-A", false}, {"SYNTHETIC-B", true}, {"", false}, {"SYNTHETIC-A", true}, {"SYNTHETIC-A", false}} {
+		if got := a.observe(step.fid); got != step.advance {
+			t.Fatalf("observe(%q) advanced=%v, want %v", step.fid, got, step.advance)
+		}
+	}
+	if a.current() != 3 {
+		t.Fatalf("epoch = %d, want 3", a.current())
+	}
+}

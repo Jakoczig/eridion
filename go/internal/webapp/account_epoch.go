@@ -21,12 +21,12 @@ const staleEpochError = "Commander changed; this view was refreshed for the sele
 // names its target commander explicitly.
 var epochExempt = setOf("getLoadingStatus", "hostInfo", "getGoAccounts", "setGoAccounts")
 
-// accountEpochState is the host's account epoch. It advances whenever the
-// commander shown on every display changes away from a known commander; each
+// accountEpochState is the host's account epoch. It advances whenever a
+// different known commander becomes the one shown on every display; each
 // advance closes gameplay connections and signals the launcher connection.
 type accountEpochState struct {
 	mu      sync.Mutex
-	fid     string
+	fid     string // last known (non-empty) displayed commander
 	epoch   atomic.Uint64
 	changed chan struct{}
 }
@@ -46,11 +46,17 @@ func (a *accountEpochState) watch() (uint64, <-chan struct{}) {
 }
 
 // observe records the displayed commander and reports whether the epoch
-// advanced. The first binding (no previous commander) shows no old data and
-// does not advance it.
+// advanced. It advances only when a different known commander replaces the
+// last known one. The first binding shows no old data, and a moment without a
+// commander (a session boundary such as a new Fileheader, before the same
+// commander's LoadGame) is not a switch; a different commander after such a
+// gap still is.
 func (a *accountEpochState) observe(fid string) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if fid == "" {
+		return false
+	}
 	previous := a.fid
 	a.fid = fid
 	if previous == "" || previous == fid {
