@@ -216,6 +216,18 @@ func main() {
 				fmt.Println("STATUS_WRITTEN=" + at)
 				continue
 			}
+			if kind == "charge" {
+				// Synthetic Status: main ship with the FSD charging for a
+				// hyperspace jump (Flags FSDCharging plus Flags2
+				// FSDHyperdriveCharging), the navigation context's charge input.
+				at := time.Now().UTC().Format(time.RFC3339Nano)
+				raw, _ := json.Marshal(map[string]any{"event": "Status", "timestamp": at, "Flags": 16777216 | 131072, "Flags2": 524288, "Fuel": map[string]any{"FuelMain": 16, "FuelReservoir": 0.5}, "Cargo": 0})
+				if err := os.WriteFile(filepath.Join(journalDir, "Status.json"), raw, 0600); err != nil {
+					panic(err)
+				}
+				fmt.Println("STATUS_WRITTEN=" + at)
+				continue
+			}
 			if kind == "load" && *deferJournal {
 				raw, err := os.ReadFile(filepath.Join(*fixture, "replay.jsonl"))
 				if err != nil {

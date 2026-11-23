@@ -17,7 +17,7 @@ export async function searchSystem (sendEvent, query, role) {
 export function adjustSlice (frame, camera, axis, direction) {
   return { selection: adjustAxis(frame, axis, direction), camera: camera || mapCameraFrame(frame) }
 }
-export default function GoGalaxy ({ context, route, sendEvent, role, policy = {}, compact = false, inspection, onInspection }) {
+export default function GoGalaxy ({ context, route, sendEvent, role, policy = {}, compact = false, inspection, onInspection, onViewSystem }) {
   const router = useRouter()
   const [manualFrame, setManualFrame] = useState(inspection?.frame || null); const [manualCamera, setManualCamera] = useState(inspection?.camera || null); const [forcedMode, setForcedMode] = useState(inspection?.mode || null)
   const [query, setQuery] = useState(inspection?.query || ''); const [searched, setSearched] = useState(inspection?.searched || null); const [notice, setNotice] = useState(''); const [busy, setBusy] = useState(false)
@@ -36,6 +36,10 @@ export default function GoGalaxy ({ context, route, sendEvent, role, policy = {}
   const q = { low: 'xyz'.split('').map(a => frame[a][0]), high: 'xyz'.split('').map(a => frame[a][1]), route: remaining.points.slice(0, 5).map(coordinates) }
   const spatialKey = JSON.stringify(q)
   const local = wantsLocal && spatial?.key === spatialKey && spatial.complete
+  // Task 3 / F04: the XYZ controls follow the selected Local inspection, not
+  // data readiness, so a pending, incomplete or failed slice can be adjusted.
+  // Only a complete response for the current query renders as Local data.
+  const localStatus = !wantsLocal || local ? '' : spatial?.key !== spatialKey || spatial.pending ? 'Loading local systems…' : spatial.failed ? 'Local data request failed. Adjust the slice or retry.' : (spatial.notice || 'Local data unavailable for this slice.')
   const mode = local ? 'local' : galaxyEnabled ? 'galaxy' : 'unavailable'
   useEffect(() => { if (local) previousMode.current = 'local'; else if (!wantsLocal) previousMode.current = 'galaxy' }, [local, wantsLocal])
   useEffect(() => {
@@ -54,7 +58,7 @@ export default function GoGalaxy ({ context, route, sendEvent, role, policy = {}
   useEffect(() => {
     if (!wantsLocal) return
     let active = true; let timer
-    const load = () => sendEvent('getGoSpatialView', JSON.parse(spatialKey)).then(v => { if (!active) return; setSpatial({ ...v, key: spatialKey }); if (v.pending) timer = setTimeout(load, 600) }).catch(() => { if (active) setSpatial({ key: spatialKey, complete: false }) })
+    const load = () => sendEvent('getGoSpatialView', JSON.parse(spatialKey)).then(v => { if (!active) return; setSpatial({ ...v, key: spatialKey }); if (v.pending) timer = setTimeout(load, 600) }).catch(() => { if (active) setSpatial({ key: spatialKey, complete: false, pending: false, failed: true }) })
     timer = setTimeout(load, 180)
     return () => { active = false; clearTimeout(timer) }
   }, [sendEvent, spatialKey, wantsLocal, refresh])
@@ -96,9 +100,10 @@ export default function GoGalaxy ({ context, route, sendEvent, role, policy = {}
         <div className='go-galaxy-mode'><button aria-pressed={mode === 'galaxy'} disabled={!galaxyEnabled} onClick={() => switchMode('galaxy')}>Galaxy</button><button aria-pressed={mode === 'local'} disabled={!localEnabled || !knownCenter} onClick={() => switchMode('local')}>Local</button></div>
         <button onClick={() => { setManualFrame(null); setManualCamera(null); setForcedMode(null) }}>Fit Route</button>
         <div className='go-galaxy-mode'><button aria-label='Galaxy zoom out' onClick={() => zoom(2)}>Zoom −</button><button aria-label='Galaxy zoom in' onClick={() => zoom(0.5)}>Zoom +</button></div>
-        {local && <div className='go-galaxy-axes'>{'xyz'.split('').map((axis, i) => <div key={axis}><span>{axis.toUpperCase()} {Math.round(spans[i])} LY</span><button aria-label={`Decrease ${axis.toUpperCase()} extent`} onClick={() => { const next = adjustSlice(frame, manualCamera, axis, -1); setManualCamera(next.camera); setManualFrame(next.selection) }}>−</button><button aria-label={`Increase ${axis.toUpperCase()} extent`} onClick={() => { const next = adjustSlice(frame, manualCamera, axis, 1); setManualCamera(next.camera); setManualFrame(next.selection) }}>+</button></div>)}</div>}
+        {wantsLocal && <div className='go-galaxy-axes'>{'xyz'.split('').map((axis, i) => <div key={axis}><span>{axis.toUpperCase()} {Math.round(spans[i])} LY</span><button aria-label={`Decrease ${axis.toUpperCase()} extent`} onClick={() => { const next = adjustSlice(frame, manualCamera, axis, -1); setManualCamera(next.camera); setManualFrame(next.selection) }}>−</button><button aria-label={`Increase ${axis.toUpperCase()} extent`} onClick={() => { const next = adjustSlice(frame, manualCamera, axis, 1); setManualCamera(next.camera); setManualFrame(next.selection) }}>+</button></div>)}</div>}
+        {localStatus && <p className='go-galaxy-local-status' role='status'>{localStatus}</p>}
         <p>{current?.name || 'Current galactic position unknown'}</p><p>{coordinates(current) ? current.coordinates.map((v, i) => `${'XYZ'[i]} ${v}`).join(' · ') + ' LY' : 'No coordinates reported'}</p>
-        {searched && <><p>{searched.name}</p><p>Distance {selectedDistance === null ? 'Unknown' : `${selectedDistance.toFixed(1)} LY`}</p><button onClick={() => router.push({ pathname: '/nav/map', query: { system: searched.systemName || searched.name } })}>View System</button></>}
+        {searched && <><p>{searched.name}</p><p>Distance {selectedDistance === null ? 'Unknown' : `${selectedDistance.toFixed(1)} LY`}</p><button onClick={() => { onViewSystem?.(); router.push({ pathname: '/nav/map', query: { system: searched.systemName || searched.name } }) }}>View System</button></>}
         <div role='status'>{!galaxyEnabled && !localEnabled ? 'Map renderers disabled' : wantsLocal && !local ? (galaxyEnabled ? 'Local detail unavailable; showing available overview' : 'Local detail unavailable; Galaxy Map disabled') : !remaining.complete ? 'Some route coordinates are unknown' : ''}{!local && galaxyEnabled && atlasNotice && <p>{atlasNotice}</p>}{notice && <p>{notice}</p>}</div>
       </div>
       <div ref={area} className='go-galaxy-area'><div className='go-galaxy-projections' style={dimensions}>{['xz', 'xy', 'yz'].map(axes => <Projection key={axes} {...projectionProps} axes={axes} pixels={JSON.parse(pixelKey)[axes][0]} pixelHeight={JSON.parse(pixelKey)[axes][1]} />)}</div></div>

@@ -123,3 +123,45 @@ test('G3F XYZ controls change the selected volume without changing the camera or
     // substitution is needed in the signed spatial backend.
   } finally { h.unmount() }
 })
+
+// Task 3 / F04: the six XYZ controls stay while Local data are pending or
+// incomplete, the backend reason is shown, one inverse edit recovers, and a
+// late reply for a superseded slice never renders. The camera never moves.
+test('XYZ controls survive pending and over-budget Local data; stale slices never render', async () => {
+  const h = harness('go-unified-galaxy', {})
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
+  const requests = []
+  h.props.sendEvent = async (name, message) => {
+    if (name === 'getGoSpatialView') return new Promise(resolve => requests.push({ message, resolve }))
+    if (name === 'getGoAtlasView') return { installed: false, pending: false }
+    return {}
+  }
+  Object.assign(h.props, { role: 'owner', context: { current: { name: 'Fixture Alpha', coordinates: [3, 4, 5] }, points: [] }, route: { hops: [] } })
+  const button = label => h.elements('button').find(b => b.props['aria-label'] === label || b.props.children === label)
+  const axes = () => h.elements('button').filter(b => /^(Increase|Decrease) [XYZ] extent$/.test(b.props['aria-label'] || '')).length
+  // One flush renders the new state, the next runs its effects (the 180 ms
+  // request timer); then the scheduled request is issued.
+  const settle = async () => { await h.flush(); await h.flush(); await wait(220); return h.flush() }
+  try {
+    await h.flush()
+    button('Local').props.onClick(); let html = await settle()
+    assert.equal(requests.length, 1, 'Local slice requested')
+    assert.equal(axes(), 6, 'controls missing while pending'); assert.match(html, /Loading local systems/)
+    const camera = () => h.elements('figure').length && JSON.stringify(h.elements('svg').map(s => s.props.viewBox))
+    const before = camera()
+    requests[0].resolve({ complete: false, pending: false, notice: 'Point budget exceeded', points: [] }); html = await h.flush()
+    assert.equal(axes(), 6, 'controls removed by an incomplete reply'); assert.match(html, /Point budget exceeded/); assert.match(html, /data-mode="galaxy"/)
+    // Two edits in a row: the first reply arrives late, after the second.
+    button('Increase X extent').props.onClick(); await settle()
+    button('Decrease X extent').props.onClick(); html = await settle()
+    assert.equal(axes(), 6); assert.equal(camera(), before, 'XYZ edit moved the camera')
+    const late = requests[1]; const current = requests.at(-1)
+    assert.notEqual(late, current)
+    current.resolve({ complete: true, pending: false, points: [[3, 4, 5, 'Fixture Alpha']] }); html = await h.flush()
+    assert.match(html, /data-mode="local"/, 'one inverse edit did not recover Local data')
+    assert.doesNotMatch(html, /Point budget exceeded|Loading local systems/)
+    late.resolve({ complete: true, pending: false, points: [[90, 90, 90, 'Superseded'], [91, 91, 91, 'Superseded'], [92, 92, 92, 'Superseded']] }); html = await h.flush()
+    assert.doesNotMatch(html, /Superseded/); assert.match(html, /data-mode="local"/)
+    assert.equal(camera(), before, 'camera changed')
+  } finally { h.unmount() }
+})

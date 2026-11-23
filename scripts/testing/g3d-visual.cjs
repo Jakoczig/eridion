@@ -42,7 +42,9 @@ async function main () {
     await evaluate('document.querySelector(\'[aria-label="Galaxy zoom in"]\').click()')
     await waitFor(() => evaluate('document.querySelector(".go-g3d").dataset.mode==="local"'))
     report.zoomTransitions = true
-    await click('Fit Route'); await waitFor(() => evaluate('document.querySelector(".go-galaxy-axes")?.textContent.includes("200 LY")'))
+    // XYZ controls stay visible while Local data load (Task 3 / F04): wait for
+    // the fitted slice's data before counting idle requests.
+    await click('Fit Route'); await waitFor(() => evaluate('document.querySelector(".go-galaxy-axes")?.textContent.includes("200 LY")&&document.querySelector(".go-g3d").dataset.mode==="local"&&!document.querySelector(".go-galaxy-local-status")'))
     const count = await evaluate('window.g3dRequests.length'); const first = Object.fromEntries((await c.call('Performance.getMetrics')).metrics.map(m => [m.name, m.value])); await delay(1200)
     const last = Object.fromEntries((await c.call('Performance.getMetrics')).metrics.map(m => [m.name, m.value])); report.idle = { heapBytes: last.JSHeapUsedSize, mainThreadPercent: 100 * (last.TaskDuration - first.TaskDuration) / (last.Timestamp - first.Timestamp) }
     if (await evaluate('window.g3dRequests.length') !== count) throw Error('Stable view repeatedly requested spatial data')
