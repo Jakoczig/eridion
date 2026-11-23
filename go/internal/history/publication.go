@@ -157,7 +157,7 @@ func (s *Store) Candidate(fid, provider, category string, e journal.Event, phase
 			v.Reason = "Recipient historical contract unavailable or event too old"
 		}
 	}
-	_, err = s.writer.Exec("INSERT INTO publication_candidates(source_event_id,commander_fid,provider,category,status,reason,created_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(source_event_id,provider,category) DO UPDATE SET status=CASE WHEN status IN ('queued','confirmed','no_new_observations','unknown_delivery') THEN status ELSE excluded.status END,reason=CASE WHEN status IN ('queued','confirmed','no_new_observations','unknown_delivery') THEN reason ELSE excluded.reason END", eventID, fid, provider, category, v.Status, v.Reason, utc())
+	_, err = s.writer.Exec("INSERT INTO publication_candidates(source_event_id,commander_fid,provider,category,status,reason,created_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(source_event_id,provider,category) DO UPDATE SET status=CASE WHEN status IN ('queued','confirmed','no_new_observations','unknown_delivery','failed','rejected','accepted_for_later') THEN status ELSE excluded.status END,reason=CASE WHEN status IN ('queued','confirmed','no_new_observations','unknown_delivery','failed','rejected','accepted_for_later') THEN reason ELSE excluded.reason END", eventID, fid, provider, category, v.Status, v.Reason, utc())
 	if err != nil {
 		return v, err
 	}
@@ -170,7 +170,7 @@ func (s *Store) CandidateOutcome(id, status, reason string) error {
 		return errors.New("Invalid candidate")
 	}
 	switch status {
-	case "queued", "confirmed", "no_new_observations", "failed", "unknown_delivery", "held":
+	case "queued", "confirmed", "no_new_observations", "failed", "unknown_delivery", "held", "rejected", "accepted_for_later":
 	default:
 		return errors.New("Invalid publication outcome")
 	}
