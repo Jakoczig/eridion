@@ -72,6 +72,10 @@ type Service struct {
 	needsStartupRebuild bool
 	accounts            AccountSettings
 	accountsError       string
+	// defaultInvalid explains why the stored default (or a migrated legacy
+	// selection) is not used: it names no verified commander once history is
+	// complete. The launcher asks once; providers stay blocked meanwhile.
+	defaultInvalid      string
 	legacyPairingFID    string
 	statisticsKey       string
 	statisticsJSON      []byte
@@ -268,7 +272,9 @@ func (s *Service) Run(ctx context.Context) error {
 				e = s.restoreCacheLocked(raw)
 				if e == nil {
 					s.restored = true
-					s.adoptDefaultLocked()
+					// No default adoption here: the cache has not yet seen the
+					// journals written while ERIDION was closed. Adoption and
+					// default validation run when the catch-up import completes.
 					s.summary.Cached = true
 					s.summary.Stage = "CATCHING_UP"
 					savedSummary := s.summary
@@ -506,8 +512,10 @@ func (s *Service) Run(ctx context.Context) error {
 				s.summary.ImportInProgress = false
 			}
 			if !s.summary.ImportInProgress {
-				// History is complete: adopt a default only if exactly one
+				// History is complete: check the stored default against the
+				// verified commanders, then adopt one only if exactly one
 				// verified commander exists, never by import order.
+				s.validateDefaultLocked()
 				s.adoptDefaultLocked()
 			}
 			if s.store != nil && s.databaseError == "" {

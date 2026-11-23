@@ -85,7 +85,7 @@ func (s *Service) displayFIDLocked() string {
 	if s.accounts.Multiple {
 		return s.accounts.Selected
 	}
-	if s.accounts.Default != "" {
+	if s.accounts.Default != "" && s.defaultInvalid == "" {
 		return s.accounts.Default
 	}
 	return s.active
@@ -105,6 +105,9 @@ func (s *Service) hostAccountLocked() string {
 	if s.accounts.Multiple {
 		return s.accounts.Selected
 	}
+	if s.defaultInvalid != "" {
+		return ""
+	}
 	return s.accounts.Default
 }
 
@@ -117,6 +120,9 @@ func (s *Service) DefaultRequired() bool {
 	return s.defaultRequiredLocked()
 }
 func (s *Service) defaultRequiredLocked() bool {
+	if s.defaultInvalid != "" {
+		return true
+	}
 	return s.accounts.Default == "" && (s.accountsError != "" || len(s.order) > 1)
 }
 
@@ -125,14 +131,38 @@ func (s *Service) defaultRequiredLocked() bool {
 func (s *Service) AccountRecovery() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.accountsError
+	if s.accountsError != "" {
+		return s.accountsError
+	}
+	return s.defaultInvalid
+}
+
+// validateDefaultLocked runs once history is complete. A stored default, or a
+// legacy selection migrated to it, that names no verified commander is not
+// used: the launcher asks once and providers stay blocked. It is never
+// replaced by another commander automatically.
+func (s *Service) validateDefaultLocked() {
+	if s.accounts.Default == "" {
+		s.defaultInvalid = ""
+		return
+	}
+	_, known := s.commanders[s.accounts.Default]
+	was := s.defaultInvalid
+	if known {
+		s.defaultInvalid = ""
+	} else {
+		s.defaultInvalid = "The default commander is not among the verified local commanders. Choose the default commander in the launcher."
+	}
+	if was != s.defaultInvalid && !s.accounts.Multiple && s.opts.ProviderAccount != nil {
+		s.opts.ProviderAccount(s.hostAccountLocked())
+	}
 }
 
 // adoptDefaultLocked records the sole verified commander as default when no
 // default exists. Several cached identities stay ambiguous for the launcher;
 // damaged preferences are never replaced automatically.
 func (s *Service) adoptDefaultLocked() {
-	if s.accounts.Default != "" || s.accountsError != "" || len(s.order) != 1 || !validAccountFID(s.order[0]) || s.order[0] == "" {
+	if s.accounts.Default != "" || s.accountsError != "" || s.summary.ImportInProgress || len(s.order) != 1 || !validAccountFID(s.order[0]) || s.order[0] == "" {
 		return
 	}
 	next := s.accounts
@@ -260,7 +290,10 @@ func (s *Service) SetDefaultAccount(fid string) error {
 	if err := s.applyAccountsLocked(next); err != nil {
 		return err
 	}
-	s.accountsError = ""
+	s.accountsError, s.defaultInvalid = "", ""
+	if !s.accounts.Multiple && s.opts.ProviderAccount != nil {
+		s.opts.ProviderAccount(fid)
+	}
 	return nil
 }
 
