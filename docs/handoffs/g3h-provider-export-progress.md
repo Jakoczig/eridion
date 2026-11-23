@@ -67,3 +67,16 @@ CI: see section 6.
 ## 5. Remaining tasks and recommended next batch
 
 Next planned batch: BioScan correctness (Tasks 6/18), catalogue and API maintenance (Tasks 16/23, which also lifts the EDDN suppression for newer items), then PERF-06–10. Also open: Task 17 EliteBGS/service contracts, Task 9, Task 10 (build identity; preview artifacts are still named by the older milestone), Tasks 20–22, Task 24 acceptance.
+
+## 6. CI and draft PR
+
+Draft PR: [#30](https://github.com/Jakoczig/eridion/pull/30), `go/g3h-provider-export-corrections` → `go/g3g-audit-corrections`.
+
+Source commit `e80f6f838f9de1f40022d3998c70b90cdff33809` (all code and this ledger before this section), first attempt:
+
+- [Go desktop foundation 45272476660](https://github.com/Jakoczig/eridion/actions/runs/45272476660): success on Linux and Windows (every step, including Go tests and race detector for `internal/desktop` with the new controller export test, native smoke and all browser and visual gates).
+- [ERIDION legacy compatibility CI 45272476914](https://github.com/Jakoczig/eridion/actions/runs/45272476914): success.
+
+Unsigned preview artifacts from run 45272476660: `eridion-g3e-Windows-x64-experimental-unsigned-preview` (id 14866144423) and `eridion-g3e-Linux-x64-experimental-unsigned-preview` (id 14865124092). They still carry the older G3E name because build identity is Task 10.
+
+No baseline failures and no new regressions were observed. The docs-only commit adding this section is verified in the PR description.
