@@ -192,3 +192,50 @@ func TestOwnerNamedLookupIsBoundedAndKeepsExactCoordinates(t *testing.T) {
 		t.Fatal("global cooldown bypass")
 	}
 }
+
+// Task 4 / F05: Resolve fills coordinates for an identity the journal already
+// witnessed, through the same consent, cache and cooldown as other lookups,
+// and refuses a reply whose ID64 differs from the witnessed address.
+func TestAuditSearchResolveBindsIdentity(t *testing.T) {
+	fake := func(id64 string, calls *int) *http.Client {
+		return &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
+			*calls++
+			raw := `{"id":77,"id64":` + id64 + `,"name":"Fixture Coordless","bodies":[],"stations":[]}`
+			if r.URL.Path == "/api-v1/system" {
+				raw = `{"id":77,"id64":` + id64 + `,"name":"Fixture Coordless","coords":{"x":3,"y":4,"z":5}}`
+			}
+			if r.URL.Path == "/api-system-v1/stations" {
+				raw = `{"id":77,"name":"Fixture Coordless","stations":[]}`
+			}
+			return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(raw))}, nil
+		})}
+	}
+	calls := 0
+	m := New("", fake("9007199254740993", &calls))
+	if v := m.Resolve(context.Background(), "Fixture Coordless", "9007199254740993"); v.Coordinates != nil || calls != 0 {
+		t.Fatal("resolved without consent", v, calls)
+	}
+	m.SetEnabled(true)
+	v := m.Resolve(context.Background(), "Fixture Coordless", "9007199254740993")
+	if v.SystemAddress != "9007199254740993" || v.Coordinates == nil || (*v.Coordinates)[2] != 5 {
+		t.Fatalf("matching identity not resolved: %+v (%d calls)", v, calls)
+	}
+	n := calls
+	if again := m.Resolve(context.Background(), "Fixture Coordless", "9007199254740993"); again.Coordinates == nil || calls != n {
+		t.Fatal("cached resolution repeated network", calls)
+	}
+
+	wrong := 0
+	m = New("", fake("123456", &wrong))
+	m.SetEnabled(true)
+	v = m.Resolve(context.Background(), "Fixture Coordless", "9007199254740993")
+	if v.Coordinates != nil || v.SystemAddress == "123456" {
+		t.Fatalf("identity mismatch merged: %+v", v)
+	}
+	if c := m.View("Fixture Coordless", "123456"); c.Coordinates != nil {
+		t.Fatal("mismatched identity cached", c)
+	}
+	if named := m.Named("Fixture Coordless"); named.SystemAddress == "123456" {
+		t.Fatal("mismatched identity remembered by name", named)
+	}
+}

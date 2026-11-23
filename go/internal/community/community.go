@@ -173,14 +173,26 @@ func (m *Manager) Named(name string) View {
 	return m.viewLocked(p.SystemName, p.SystemAddress)
 }
 func (m *Manager) Lookup(ctx context.Context, name string) View {
-	return m.refresh(ctx, name, "", true)
+	return m.refresh(ctx, name, "", true, "")
 }
 func (m *Manager) Refresh(ctx context.Context, name, address string) View {
-	return m.refresh(ctx, name, address, false)
+	return m.refresh(ctx, name, address, false, "")
 }
-func (m *Manager) refresh(ctx context.Context, name, address string, resolve bool) View {
+
+// Resolve looks up the coordinates of a system whose identity the journal
+// already witnessed (Task 4 / F05). It uses the same consent, cache,
+// cooldown and identity checks as Lookup, and additionally refuses any reply
+// whose ID64 differs from expectedAddress: a mismatch is neither returned
+// with coordinates nor cached.
+func (m *Manager) Resolve(ctx context.Context, name, expectedAddress string) View {
+	if exactID(expectedAddress) == "" {
+		return m.View(name, expectedAddress)
+	}
+	return m.refresh(ctx, name, expectedAddress, true, expectedAddress)
+}
+func (m *Manager) refresh(ctx context.Context, name, address string, resolve bool, expected string) View {
 	m.mu.Lock()
-	if resolve {
+	if resolve && expected == "" {
 		if known, ok := m.positions[strings.ToLower(name)]; ok {
 			address = known.SystemAddress
 		}
@@ -218,6 +230,8 @@ func (m *Manager) refresh(ctx context.Context, name, address string, resolve boo
 		if err == nil {
 			if !strings.EqualFold(resolved.Name, name) || exactID(resolved.ID64.String()) == "" {
 				err = errors.New("system identity unavailable")
+			} else if expected != "" && exactID(resolved.ID64.String()) != expected {
+				err = errors.New("system identity mismatch")
 			} else {
 				address = exactID(resolved.ID64.String())
 				name = resolved.Name

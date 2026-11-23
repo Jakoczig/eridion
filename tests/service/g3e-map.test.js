@@ -27,7 +27,11 @@ test('search is local first and never requests external data with disabled conse
     calls.length = 0; await h.exports.searchSystem(send, 'Target', 'viewer'); assert.deepEqual(calls, ['getGoSystem', 'lookupGoSystem'])
     calls.length = 0; await h.exports.searchSystem(send, '   ', 'owner'); assert.deepEqual(calls, [])
     calls.length = 0; await h.exports.searchSystem(async name => { calls.push(name); return { point: {}, availability: 'unavailable', community: { enabled: false } } }, 'Unknown', 'owner'); assert.deepEqual(calls, ['getGoSystem'])
-    calls.length = 0; await h.exports.searchSystem(async name => { calls.push(name); return { point: { name: 'Known' }, community: { enabled: true } } }, 'Known', 'owner'); assert.deepEqual(calls, ['getGoSystem'])
+    // Task 4 / F05: a named local hit without coordinates is not a usable
+    // result; with consent it continues to the authorized lookup.
+    calls.length = 0; await h.exports.searchSystem(async name => { calls.push(name); return { point: { name: 'Known' }, community: { enabled: true } } }, 'Known', 'owner'); assert.deepEqual(calls, ['getGoSystem', 'lookupGoSystem'])
+    calls.length = 0; await h.exports.searchSystem(async name => { calls.push(name); return { point: { name: 'Known' }, community: { enabled: false } } }, 'Known', 'viewer'); assert.deepEqual(calls, ['getGoSystem'])
+    calls.length = 0; await h.exports.searchSystem(async name => { calls.push(name); return { point: { name: 'Known', coordinates: [1, 2, 3] }, community: { enabled: true } } }, 'Known', 'owner'); assert.deepEqual(calls, ['getGoSystem'])
     assert.match(h.html(), />Search<\/button>/)
     assert.doesNotMatch(h.html(), /Lookup with enabled EDSM|Search local \/ cached/)
   } finally { h.unmount() }
@@ -163,5 +167,43 @@ test('XYZ controls survive pending and over-budget Local data; stale slices neve
     late.resolve({ complete: true, pending: false, points: [[90, 90, 90, 'Superseded'], [91, 91, 91, 'Superseded'], [92, 92, 92, 'Superseded']] }); html = await h.flush()
     assert.doesNotMatch(html, /Superseded/); assert.match(html, /data-mode="local"/)
     assert.equal(camera(), before, 'camera changed')
+  } finally { h.unmount() }
+})
+
+// Task 4 / F05: results belong to the query that produced them.
+test('search results are bound to their query; stale, failed and unmounted replies never act', async () => {
+  const h = harness('go-unified-galaxy', {})
+  const pending = []
+  h.props.policy = { galaxyMap: false, localAtlas: false }
+  h.props.sendEvent = (name, message) => new Promise(resolve => pending.push({ name, message, resolve }))
+  const type = value => { h.elements('input')[0].props.onChange({ target: { value } }); h.html() }
+  const submit = () => h.elements('form')[0].props.onSubmit({ preventDefault () {} })
+  const tick = () => new Promise(resolve => setImmediate(resolve))
+  const viewSystem = () => h.elements('button').some(b => b.props.children === 'View System')
+  try {
+    h.html()
+    type('Alpha'); submit(); await tick()
+    pending.shift().resolve({ point: { name: 'Alpha', address: '1', coordinates: [1, 2, 3], source: 'journal' }, community: { enabled: false } }); await tick()
+    let html = h.html()
+    assert.ok(viewSystem(), 'successful search not actionable'); assert.match(html, /Alpha/)
+    // Editing the query invalidates the previous search result.
+    type('Beta'); html = h.html()
+    assert.ok(!viewSystem(), 'previous result stayed actionable after the query changed')
+    // A failed search for Beta cannot leave Alpha actionable.
+    submit(); await tick()
+    pending.shift().resolve({ point: {}, availability: 'unavailable', community: { enabled: false } }); await tick(); html = h.html()
+    assert.ok(!viewSystem()); assert.match(html, /Beta/); assert.match(html, /unavailable/i)
+    // A reply for a query the user has since changed is discarded.
+    type('Gamma'); submit(); await tick()
+    const late = pending.shift(); type('Delta'); late.resolve({ point: { name: 'Gamma', address: '3', coordinates: [3, 3, 3] }, community: { enabled: false } }); await tick(); html = h.html()
+    assert.ok(!viewSystem(), 'reply for a superseded query became actionable'); assert.doesNotMatch(html, /Distance/)
+    // Stale cached community data stay labelled as stale with their date.
+    type('Epsilon'); submit(); await tick()
+    pending.shift().resolve({ point: { name: 'Epsilon', address: '5', coordinates: [5, 5, 5], source: 'EDSM' }, community: { enabled: true, status: 'stale', fetchedAt: '2026-01-02T03:04:05Z' } }); await tick(); html = h.html()
+    assert.ok(viewSystem()); assert.match(html, /stale/i); assert.match(html, /2026-01-02/)
+    // A reply arriving after unmount changes nothing and throws nothing.
+    type('Zeta'); submit(); await tick()
+    const orphan = pending.shift(); h.unmount()
+    orphan.resolve({ point: { name: 'Zeta', coordinates: [6, 6, 6] } }); await tick()
   } finally { h.unmount() }
 })

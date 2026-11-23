@@ -10,8 +10,23 @@ export async function searchSystem (sendEvent, query, role) {
   const name = query.trim()
   if (!name) return null
   const cached = await sendEvent('getGoSystem', { name })
-  if (cached.point?.name || (cached.availability && cached.availability !== 'unavailable') || !cached.community?.enabled) return cached
+  // Task 4 / F05: a named hit without coordinates is not a usable result; with
+  // consent it continues to the authorized lookup, which resolves coordinates
+  // only for the same witnessed identity.
+  if ((cached.point?.name && coordinates(cached.point)) || !cached.community?.enabled) return cached
+  if (!cached.point?.name && cached.availability && cached.availability !== 'unavailable') return cached
   return sendEvent('lookupGoSystem', { name })
+}
+// Source and freshness travel with the result they describe (Task 4 / F05).
+export function searchNotice (result, point) {
+  if (!point) return result?.community?.notice || 'System unavailable; external lookup unavailable'
+  const parts = []
+  if (!coordinates(point)) parts.push('No coordinates reported')
+  else if (point.coordinatesSource) parts.push(`Coordinates from ${point.coordinatesSource}${point.coordinatesFetchedAt ? ` · retrieved ${point.coordinatesFetchedAt}` : ''}`)
+  const community = result?.community
+  if (community?.status === 'stale') parts.push(`Cached EDSM data${community.fetchedAt ? ` from ${community.fetchedAt}` : ''} (stale)`)
+  else if (point.source === 'EDSM' && community?.fetchedAt) parts.push(`EDSM data retrieved ${community.fetchedAt}`)
+  return parts.join(' · ')
 }
 // XYZ controls adjust the inspected data volume, never the camera.
 export function adjustSlice (frame, camera, axis, direction) {
@@ -22,6 +37,14 @@ export default function GoGalaxy ({ context, route, sendEvent, role, policy = {}
   const [manualFrame, setManualFrame] = useState(inspection?.frame || null); const [manualCamera, setManualCamera] = useState(inspection?.camera || null); const [forcedMode, setForcedMode] = useState(inspection?.mode || null)
   const [query, setQuery] = useState(inspection?.query || ''); const [searched, setSearched] = useState(inspection?.searched || null); const [notice, setNotice] = useState(''); const [busy, setBusy] = useState(false)
   const searchPending = useRef(false)
+  // Task 4 / F05: a search result belongs to the query that produced it.
+  // searchedQuery is that query (null for a marker the user selected);
+  // replies for an older request, a changed query or an unmounted map are
+  // discarded.
+  const [searchedQuery, setSearchedQuery] = useState(inspection?.searchedQuery ?? null)
+  const queryRef = useRef(query); queryRef.current = query
+  const searchSeq = useRef(0); const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const [atlas, setAtlas] = useState(null); const [atlasNotice, setAtlasNotice] = useState(''); const [spatial, setSpatial] = useState(null); const [refresh, setRefresh] = useState(0)
   const area = useRef(null); const [size, setSize] = useState([320, 320]); const previousMode = useRef('galaxy')
   const galaxyEnabled = policy.galaxyMap !== false; const localEnabled = policy.localAtlas !== false
@@ -30,7 +53,7 @@ export default function GoGalaxy ({ context, route, sendEvent, role, policy = {}
   const frame = manualFrame || automaticFrame(current, remaining, atlasExtents)
   const frameKey = JSON.stringify(frame)
   const manualKey = JSON.stringify(manualFrame); const cameraKey = JSON.stringify(manualCamera)
-  useEffect(() => { onInspection?.({ frame: manualFrame, camera: manualCamera, mode: forcedMode, query, searched }) }, [manualKey, cameraKey, forcedMode, query, JSON.stringify(searched), onInspection])
+  useEffect(() => { onInspection?.({ frame: manualFrame, camera: manualCamera, mode: forcedMode, query, searched, searchedQuery }) }, [manualKey, cameraKey, forcedMode, query, JSON.stringify(searched), searchedQuery, onInspection])
   const knownCenter = !!coordinates(current) || !!manualFrame || remaining.points.length > 0
   const wantsLocal = localEnabled && knownCenter && (forcedMode === 'local' || (!forcedMode && remaining.complete && localScale(frame, previousMode.current)))
   const q = { low: 'xyz'.split('').map(a => frame[a][0]), high: 'xyz'.split('').map(a => frame[a][1]), route: remaining.points.slice(0, 5).map(coordinates) }
@@ -79,8 +102,25 @@ export default function GoGalaxy ({ context, route, sendEvent, role, policy = {}
   }, [sendEvent, frameKey, queryPixelsKey, galaxyEnabled, local, compact, refresh])
   const search = async () => {
     if (searchPending.current || !query.trim()) return
+    const submitted = query.trim(); const seq = ++searchSeq.current
+    const current = () => mounted.current && seq === searchSeq.current && queryRef.current.trim() === submitted
     searchPending.current = true; setBusy(true)
-    try { const result = await searchSystem(sendEvent, query, role); setSearched(result?.point?.name ? result.point : null); setNotice(result?.point?.name ? (result.point.coordinates ? '' : 'No coordinates reported') : (result?.community?.notice || 'System unavailable; external lookup unavailable')) } catch { setNotice('System lookup unavailable') } finally { searchPending.current = false; setBusy(false) }
+    try {
+      const result = await searchSystem(sendEvent, query, role)
+      if (!current()) return
+      const point = result?.point?.name ? result.point : null
+      setSearched(point); setSearchedQuery(point ? submitted : null)
+      setNotice(searchNotice(result, point))
+    } catch {
+      if (!current()) return
+      setSearched(null); setSearchedQuery(null); setNotice('System lookup unavailable')
+    } finally { searchPending.current = false; if (mounted.current) setBusy(false) }
+  }
+  const editQuery = value => {
+    setQuery(value)
+    // Editing the query invalidates the result of the previous search.
+    if (searchedQuery !== null) { setSearched(null); setSearchedQuery(null) }
+    setNotice('')
   }
   const switchMode = next => { setForcedMode(next); setManualCamera(null); setManualFrame(next === 'local' && !localScale(automaticFrame(current, remaining, atlasExtents), 'local') && coordinates(current) ? automaticFrame(current, { points: [] }, atlasExtents) : null); previousMode.current = next }
   const path = [current, ...remaining.rawPoints].filter((p, i) => i !== 0 || coordinates(p))
@@ -91,12 +131,12 @@ export default function GoGalaxy ({ context, route, sendEvent, role, policy = {}
     setManualCamera(panFrame(displayFrame, axes, dx, dy))
   }
   const zoom = factor => { setManualFrame(zoomFrame(frame, factor)); setManualCamera(zoomFrame(displayFrame, factor)); setForcedMode(null) }
-  const projectionProps = { current, destination, searched, route: path.filter(coordinates), onSelect: setSearched, frame: displayFrame, onPan, localGeometry: false, clipSelection: false, selectionFrame: frame, routeSegments: spatialSegments(path, frame), atlas: galaxyEnabled && !local ? atlas : null, spatial: local ? spatial.points || [] : null }
+  const projectionProps = { current, destination, searched, route: path.filter(coordinates), onSelect: point => { setSearched(point); setSearchedQuery(null) }, frame: displayFrame, onPan, localGeometry: false, clipSelection: false, selectionFrame: frame, routeSegments: spatialSegments(path, frame), atlas: galaxyEnabled && !local ? atlas : null, spatial: local ? spatial.points || [] : null }
   const selectedDistance = distance(current?.coordinates, searched?.coordinates)
   return (
     <section className={`go-page go-galaxy go-g3d ${compact ? 'is-compact' : ''}`} aria-label='Galaxy map' data-mode={mode}>
       <div className='go-galaxy-sidebar'><h2>Galaxy Map</h2>
-        <form onSubmit={e => { e.preventDefault(); search() }}><label>System<input aria-label='Galaxy system search' maxLength={128} value={query} onChange={e => setQuery(e.target.value)} /></label><button disabled={busy || !query.trim()}>Search</button></form>
+        <form onSubmit={e => { e.preventDefault(); search() }}><label>System<input aria-label='Galaxy system search' maxLength={128} value={query} onChange={e => editQuery(e.target.value)} /></label><button disabled={busy || !query.trim()}>Search</button></form>
         <div className='go-galaxy-mode'><button aria-pressed={mode === 'galaxy'} disabled={!galaxyEnabled} onClick={() => switchMode('galaxy')}>Galaxy</button><button aria-pressed={mode === 'local'} disabled={!localEnabled || !knownCenter} onClick={() => switchMode('local')}>Local</button></div>
         <button onClick={() => { setManualFrame(null); setManualCamera(null); setForcedMode(null) }}>Fit Route</button>
         <div className='go-galaxy-mode'><button aria-label='Galaxy zoom out' onClick={() => zoom(2)}>Zoom −</button><button aria-label='Galaxy zoom in' onClick={() => zoom(0.5)}>Zoom +</button></div>
