@@ -19,6 +19,9 @@ func TestAuditPublicInventoryClassification(t *testing.T) {
 		{"outfitting", "", "paintjob_cobramkiii_default_52", "", false, true},       // not a module
 		{"outfitting", "999999999", "hpt_future_weapon", "", false, false},          // unknown
 		{"outfitting", "128049513", "hpt_pulselaser_fixed_small", "", false, false}, // ID/symbol mismatch
+		// Tech-broker unlocks are commander-dependent (G3H final review).
+		{"outfitting", "128793117", "int_metaalloyhullreinforcement_size1_class1", "Int_MetaAlloyHullReinforcement_Size1_Class1", false, true},
+		{"outfitting", "128834002", "hpt_plasmashockcannon_fixed_medium", "Hpt_PlasmaShockCannon_Fixed_Medium", false, true},
 		{"shipyard", "128049291", "Dolphin", "Dolphin", true, true},
 		{"shipyard", "128816567", "krait_mkii", "Krait_MkII", true, true},
 		{"shipyard", "", "CobraMkIV", "CobraMkIV", false, true},

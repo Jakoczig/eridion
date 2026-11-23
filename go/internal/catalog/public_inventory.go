@@ -48,15 +48,13 @@ func loadInventory() {
 	}
 }
 
+// permittedEntitlement allows only ordinary stock: no entitlement, or the
+// Horizons planetary-landings product every current commander owns. Every
+// other entitlement marks a commander- or rank-dependent item (PowerPlay
+// modules, Guardian and tech-broker unlocks, pre-order hulls, removed items)
+// that the EDDN schemas ask senders to omit (allowlist, as EDMC does by sku).
 func permittedEntitlement(kind, entitlement, symbol string) bool {
-	switch {
-	case entitlement == "removed":
-		return false
-	case strings.HasPrefix(entitlement, "ELITE_SPECIFIC_V_POWER"): // PowerPlay rank modules
-		return false
-	case strings.HasPrefix(entitlement, "ELITE_HORIZONS_V_GUARDIAN"): // per-commander unlocks
-		return false
-	case strings.Contains(entitlement, "COBRA_MK_IV"): // pre-order entitlement
+	if entitlement != "" && entitlement != "ELITE_HORIZONS_V_PLANETARY_LANDINGS" {
 		return false
 	}
 	if kind == "outfitting" && strings.EqualFold(symbol, "Int_PlanetApproachSuite") {

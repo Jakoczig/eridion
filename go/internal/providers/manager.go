@@ -654,7 +654,11 @@ func (m *Manager) dispatch(id string) {
 	} else if err == nil && (status == 429 || status == 503) {
 		// Task 7 / F08: refusals exhausted (or the refusal raced a
 		// cancellation): a terminal outcome, never residue in "queued".
-		m.outcomeLocked(batch, "failed", "Recipient refused repeatedly (HTTP "+strconv.Itoa(status)+"); not retried")
+		reason := "Recipient refused repeatedly (HTTP " + strconv.Itoa(status) + "); not retried"
+		if requestCancelled {
+			reason = "Recipient refused (HTTP " + strconv.Itoa(status) + ") while publication was being cancelled; not retried"
+		}
+		m.outcomeLocked(batch, "failed", reason)
 	}
 }
 func (m *Manager) request(ctx context.Context, method, endpoint, ct string, body []byte, bearer string) ([]byte, int, error) {
