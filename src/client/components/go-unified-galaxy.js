@@ -101,10 +101,13 @@ export default function GoGalaxy ({ context, route, sendEvent, role, policy = {}
     return () => { active = false; clearTimeout(timer) }
   }, [sendEvent, frameKey, queryPixelsKey, galaxyEnabled, local, compact, refresh])
   const search = async () => {
-    if (searchPending.current || !query.trim()) return
-    const submitted = query.trim(); const seq = ++searchSeq.current
+    const submitted = query.trim()
+    // Block only a duplicate of the pending query; a different query
+    // supersedes it (the older reply is then discarded by the sequence).
+    if (!submitted || searchPending.current === submitted) return
+    const seq = ++searchSeq.current
     const current = () => mounted.current && seq === searchSeq.current && queryRef.current.trim() === submitted
-    searchPending.current = true; setBusy(true)
+    searchPending.current = submitted; setBusy(submitted)
     try {
       const result = await searchSystem(sendEvent, query, role)
       if (!current()) return
@@ -114,7 +117,7 @@ export default function GoGalaxy ({ context, route, sendEvent, role, policy = {}
     } catch {
       if (!current()) return
       setSearched(null); setSearchedQuery(null); setNotice('System lookup unavailable')
-    } finally { searchPending.current = false; if (mounted.current) setBusy(false) }
+    } finally { if (seq === searchSeq.current) { searchPending.current = false; if (mounted.current) setBusy(false) } }
   }
   const editQuery = value => {
     setQuery(value)
@@ -136,7 +139,7 @@ export default function GoGalaxy ({ context, route, sendEvent, role, policy = {}
   return (
     <section className={`go-page go-galaxy go-g3d ${compact ? 'is-compact' : ''}`} aria-label='Galaxy map' data-mode={mode}>
       <div className='go-galaxy-sidebar'><h2>Galaxy Map</h2>
-        <form onSubmit={e => { e.preventDefault(); search() }}><label>System<input aria-label='Galaxy system search' maxLength={128} value={query} onChange={e => editQuery(e.target.value)} /></label><button disabled={busy || !query.trim()}>Search</button></form>
+        <form onSubmit={e => { e.preventDefault(); search() }}><label>System<input aria-label='Galaxy system search' maxLength={128} value={query} onChange={e => editQuery(e.target.value)} /></label><button disabled={!query.trim() || busy === query.trim()}>Search</button></form>
         <div className='go-galaxy-mode'><button aria-pressed={mode === 'galaxy'} disabled={!galaxyEnabled} onClick={() => switchMode('galaxy')}>Galaxy</button><button aria-pressed={mode === 'local'} disabled={!localEnabled || !knownCenter} onClick={() => switchMode('local')}>Local</button></div>
         <button onClick={() => { setManualFrame(null); setManualCamera(null); setForcedMode(null) }}>Fit Route</button>
         <div className='go-galaxy-mode'><button aria-label='Galaxy zoom out' onClick={() => zoom(2)}>Zoom −</button><button aria-label='Galaxy zoom in' onClick={() => zoom(0.5)}>Zoom +</button></div>
