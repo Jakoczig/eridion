@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/Jakoczig/eridion/go/internal/journal"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -298,5 +299,51 @@ func TestAuditMergeJournalRanksFollowsAuthority(t *testing.T) {
 	fresh := []ResolvedRank{{Category: "combat", Rank: "8", Source: "frontier", Authority: "frontier"}}
 	if c := rankByCategory(MergeJournalRanks(fresh, journal), "combat"); c.Rank != "8" || c.Source != "frontier" || c.Progress != nil {
 		t.Fatalf("fresh Frontier replaced: %+v", c)
+	}
+}
+
+// G3H review finding 1: Frontier/Inara snapshots carry no observation time.
+// The latest fetch must stay effective however many snapshots a commander
+// has accumulated, and fetch times compare as instants, not as raw text.
+func TestAuditLatestSnapshotWinsBeyondWindow(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var last time.Time
+	for i := 0; i < 300; i++ {
+		last = start.Add(time.Duration(i) * time.Hour)
+		saveFacts(t, s, "frontier", time.Time{}, last, map[string]any{"credits": strconv.Itoa(i)})
+	}
+	facts, err := s.EffectiveFacts(context.Background(), "SYNTHETIC-A", "commander", last.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var credits *EffectiveFact
+	for i := range facts {
+		if facts[i].Field == "credits" {
+			credits = &facts[i]
+		}
+	}
+	if credits == nil || string(credits.Value) != `"299"` || !credits.Eligible || credits.Stale {
+		t.Fatalf("latest of 300 snapshots not effective: %+v", credits)
+	}
+
+	// Same second, fractional later fetch: "…:00Z" must not sort after "…:00.5Z".
+	s2, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	at := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+	saveFacts(t, s2, "inara", time.Time{}, at, map[string]any{"credits": "1"})
+	saveFacts(t, s2, "inara", time.Time{}, at.Add(500*time.Millisecond), map[string]any{"credits": "2"})
+	facts, _ = s2.EffectiveFacts(context.Background(), "SYNTHETIC-A", "commander", at.Add(time.Minute))
+	for _, f := range facts {
+		if f.Field == "credits" && string(f.Value) != `"2"` {
+			t.Fatalf("earlier fetch won the raw-text tie-break: %s", f.Value)
+		}
 	}
 }

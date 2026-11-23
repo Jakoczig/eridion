@@ -85,7 +85,7 @@ func (s *Store) currentFactEvidence(ctx context.Context, fid, entity string, now
 					continue
 				}
 			}
-			rows, err := s.reader.QueryContext(ctx, `SELECT p.source_ref,coalesce(p.observed_at,''),coalesce(p.fetched_at,''),p.value_json,coalesce(e.expires_at,''),coalesce(j.source_id,e.fetched_at,''),coalesce(j.byte_offset,0),coalesce(j.line_hash,e.content_hash,'') FROM field_provenance p LEFT JOIN journal_events j ON p.source='journal' AND j.event_id=cast(p.source_ref AS INTEGER) LEFT JOIN external_snapshots e ON p.source<>'journal' AND e.id=cast(p.source_ref AS INTEGER) AND p.source=e.provider WHERE p.commander_fid IS ? AND p.entity=? AND p.field=? AND p.source=? AND p.observed_key=? LIMIT 256`, owner, entity, field, source, key.String)
+			rows, err := s.reader.QueryContext(ctx, `SELECT p.source_ref,coalesce(p.observed_at,''),coalesce(p.fetched_at,''),p.value_json,coalesce(e.expires_at,''),coalesce(j.source_id,e.fetched_at,''),coalesce(j.byte_offset,0),coalesce(j.line_hash,e.content_hash,'') FROM field_provenance p LEFT JOIN journal_events j ON p.source='journal' AND j.event_id=cast(p.source_ref AS INTEGER) LEFT JOIN external_snapshots e ON p.source<>'journal' AND e.id=cast(p.source_ref AS INTEGER) AND p.source=e.provider WHERE p.commander_fid IS ? AND p.entity=? AND p.field=? AND p.source=? AND p.observed_key=? ORDER BY p.id DESC LIMIT 256`, owner, entity, field, source, key.String)
 			if err != nil {
 				return nil, err
 			}
@@ -103,6 +103,13 @@ func (s *Store) currentFactEvidence(ctx context.Context, fid, entity string, now
 				}
 				v.Source = source
 				v.Value = json.RawMessage(raw)
+				if source != "journal" {
+					// External tie-break: compare the fetch instant, not raw
+					// RFC3339 text ("…:00Z" would sort after "…:00.5Z").
+					if k := observationKey(o.Source); k != "" {
+						o.Source = k
+					}
+				}
 				if !found || betterObservation(o, bestObs, cutoff) {
 					best, bestObs, bestExpires, found = v, o, expires, true
 				}
