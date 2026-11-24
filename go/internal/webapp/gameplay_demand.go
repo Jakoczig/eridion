@@ -177,6 +177,11 @@ func (e *encodedPayloads) frame(key, name string, revision uint64, value any) ([
 	// Encoding under the lock makes concurrent sockets share one encoding
 	// (single flight); payloads are small and the lock is never held while
 	// writing to a connection.
+	if revision == 0 {
+		// An unpublished snapshot (a connection's initial projection) has no
+		// identity to share: encode it for this connection only.
+		return json.Marshal(map[string]any{"name": name, "message": value})
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if p, ok := e.entries[key]; ok && p.revision == revision {

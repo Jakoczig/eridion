@@ -269,3 +269,20 @@ func TestPerfLowLatencySetting(t *testing.T) {
 	}
 	waitDemand(t, s, 0)
 }
+
+// The initial snapshot a connection receives has no published revision; its
+// encoding must never be shared with a later connection (whose initial
+// snapshot may differ).
+func TestPerfInitialSnapshotNotShared(t *testing.T) {
+	s, dir := demandFixture(t)
+	a := collect(t, dialScoped(t, s, ""))
+	a.drain(200 * time.Millisecond)
+	s.game.SetDemand(0) // nothing prepared: the next jump is not published
+	jump(t, s, dir, "Fixture Later", 6)
+	b := collect(t, dialScoped(t, s, ""))
+	b.drain(300 * time.Millisecond)
+	if !strings.Contains(b.payload("goNavigationChanged"), "Fixture Later") {
+		t.Fatalf("a new connection received another connection's older initial snapshot: %s", b.payload("goNavigationChanged"))
+	}
+	_ = a
+}
