@@ -121,6 +121,207 @@
           ]
         }
       ]
+    },
+    {
+      "id": "silarn-bioscan",
+      "repository": "https://github.com/Silarn/EDMC-BioScan",
+      "revision": "fc6b85c3de48c8fb79fa9e4f79ad780e48f56629",
+      "observedHead": "fc6b85c3de48c8fb79fa9e4f79ad780e48f56629",
+      "checkedAt": "2026-11-24",
+      "status": "current",
+      "license": "GPL-2.0-or-later (README and load.py grant; LICENSE.txt is GPL-2.0); GPL-3.0 selected for ERIDION.",
+      "attribution": "Jeremy Rimpo (Silarn), EDMC-BioScan",
+      "notes": "Vendored as literal data fixtures, parsed by go/internal/fieldops/bioconvert (never executed). bio-rules.json and predicate-support.json are generated from them (go run ./cmd/bioscan-rules); TestBioRulesGeneratedFromPinnedSources checks consistency. nebula_data/reference_stars.py is not vendored (nebula distances stay unknown).",
+      "files": [
+        {
+          "path": "src/bio_scan/bio_data/rulesets/aleoida.py",
+          "sha256": "18649161ea5fd9610d710b8741a922e80a780d99bd594f7de14fa38a92642615",
+          "bundled": [
+            "go/internal/fieldops/upstream/bioscan/rulesets/aleoida.py"
+          ]
+        },
+        {
+          "path": "src/bio_scan/bio_data/rulesets/anemone.py",
+          "sha256": "db92266c23bd20d77003cec10274ab125d92c300c36a8a86f7fa8c8eebcc4a1c",
+          "bundled": [
+            "go/internal/fieldops/upstream/bioscan/rulesets/anemone.py"
+          ]
+        },
+        {
+          "path": "src/bio_scan/bio_data/rulesets/bacterium.py",
+          "sha256": "a7e3ca9e7e5836f68d7d04ae34847a2dcc2e66de6c9b3be7f633e55b8fc83b61",
+          "bundled": [
+            "go/internal/fieldops/upstream/bioscan/rulesets/bacterium.py"
+          ]
+        },
+        {
+          "path": "src/bio_scan/bio_data/rulesets/brain_tree.py",
+          "sha256": "b781181b546ffbf8534c51016c808c0efa471c94672b33807d6fc5f63da26526",
+          "bundled": [
+            "go/internal/fieldops/upstream/bioscan/rulesets/brain_tree.py"
+          ]
+        },
+        {
+          "path": "src/bio_scan/bio_data/rulesets/cactoida.py",
+          "sha256": "939c0128a3a8ce1c7acff43bdbb72c79bca8b6415c7afe8ca3540845a7d8e1be",
+          "bundled": [
+            "go/internal/fieldops/upstream/bioscan/rulesets/cactoida.py"
+          ]
+        },
+        {
+          "path": "src/bio_scan/bio_data/rulesets/clypeus.py",
+          "sha256": "0071d7111443a50ba031be23810b7065f4a13632c18c74ae96eaad0e0147857a",
+          "bundled": [
+            "go/internal/fieldops/upstream/bioscan/rulesets/clypeus.py"
+          ]
+        },
+        {
+          "path": "src/bio_scan/bio_data/rulesets/concha.py",
+          "sha256": "2b5e7be6e0ccf2ac9a8d671067d5943464f18100068dae0e6a4b332134dd2371",
+          "bundled": [
+            "go/internal/fieldops/upstream/bioscan/rulesets/concha.py"
+          ]
+        },
+        {
+          "path": "src/bio_scan/bio_data/rulesets/electricae.py",
+          "sha256": "5a6c38753aaa2dd38e034b58021bbd9350130cb3b252acb8e6d6e4985cbf916a",
+          "bundled": [
+            "go/internal/fieldops/upstream/bioscan/rulesets/electricae.py"
+          ]
+        },
+        {
+          "path": "src/bio_scan/bio_data/rulesets/fonticulua.py",
+          "sha256": "1df60ee8ee2c9e37c5c5355ce5285dcc7fb2bcd4e3411b4f8ec63c3b7938254f",
+          "bundled": [
+            "go/internal/fieldops/upstream/bioscan/rulesets/fonticulua.py"
+          ]
+        },
+        {
+          "path": "src/bio_scan/bio_data/rulesets/frutexa.py",
+          "sha256": "6dd5551f34853e949a135ada30e0b51eea67c2b8d4cefbefe19b296e9a26f14b",
+          "bundled": [
+            "go/internal/fieldops/upstream/bioscan/rulesets/frutexa.py"
+          ]
+        },
+        {
+          "path": "src/bio_scan/bio_data/rulesets/fumerola.py",
+          "sha256": "8bc88b6b5fc24149b0935dd835adfb8fd76646fe089abb2dad6c4355b8f9bdb3",
+          "bundled": [
+            "go/internal/fieldops/upstream/bioscan/rulesets/fumerola.py"
+          ]
+        },
+        {
+          "path": "src/bio_scan/bio_data/rulesets/fungoida.py",
+          "sha256": "a5deab255294fe8e4678bb3437c113e362cf69207d171a483398326de3f6b2be",
+          "bundled": [
+            "go/internal/fieldops/upstream/bioscan/rulesets/fungoida.py"
+          ]
+        },
+        {
+          "path": "src/bio_scan/bio_data/rulesets/osseus.py",
+          "sha256": "babfcf20671ba96ae1338093436b653d98db93e011c89ca5ae4e2cbc672ad1b7",
+          "bundled": [
+            "go/internal/fieldops/upstream/bioscan/rulesets/osseus.py"
+          ]
+        },
+        {
+          "path": "src/bio_scan/bio_data/rulesets/recepta.py",
+          "sha256": "60ea04ba91eab17d2e533ebd7233a6f753a0d67717ef20aa7bc7a365a29e394a",
+          "bundled": [
+            "go/internal/fieldops/upstream/bioscan/rulesets/recepta.py"
+          ]
+        },
+        {
+          "path": "src/bio_scan/bio_data/rulesets/shard.py",
+          "sha256": "e6729da6b5e20392e96471ba034052ef6933c4437b737c24cae32f19b806fe3b",
+          "bundled": [
+            "go/internal/fieldops/upstream/bioscan/rulesets/shard.py"
+          ]
+        },
+        {
+          "path": "src/bio_scan/bio_data/rulesets/stratum.py",
+          "sha256": "e068c8606bd4c72aef09ebfff55a8d7d91c227f8af98056379cc3da55ecf59be",
+          "bundled": [
+            "go/internal/fieldops/upstream/bioscan/rulesets/stratum.py"
+          ]
+        },
+        {
+          "path": "src/bio_scan/bio_data/rulesets/tubers.py",
+          "sha256": "44b783d9726022a96583466166f3eb25b6f1f66e4eec24ec5fe9105d77dc6700",
+          "bundled": [
+            "go/internal/fieldops/upstream/bioscan/rulesets/tubers.py"
+          ]
+        },
+        {
+          "path": "src/bio_scan/bio_data/rulesets/tubus.py",
+          "sha256": "9a9ab558e2619cdec8b1851d78c4d51410c2f4e93e264491cbd967ad15ca904c",
+          "bundled": [
+            "go/internal/fieldops/upstream/bioscan/rulesets/tubus.py"
+          ]
+        },
+        {
+          "path": "src/bio_scan/bio_data/rulesets/tussock.py",
+          "sha256": "28b863984b31761fbccaed3c302345b9ae3169850668a5b6aafa34066108c4f1",
+          "bundled": [
+            "go/internal/fieldops/upstream/bioscan/rulesets/tussock.py"
+          ]
+        },
+        {
+          "path": "src/bio_scan/bio_data/species.py",
+          "sha256": "5254a4f8a01c8b8a2d19f079db68d6d61b9974a153c0bd7e1d351623cf193663",
+          "bundled": [
+            "go/internal/fieldops/upstream/bioscan/species.py"
+          ]
+        },
+        {
+          "path": "src/bio_scan/bio_data/regions.py",
+          "sha256": "b9e919919ebb684bfe0c5f0af1cbbbea3d88ea625b5d270120951c42d4dab630",
+          "bundled": [
+            "go/internal/fieldops/upstream/bioscan/regions.py"
+          ]
+        },
+        {
+          "path": "src/bio_scan/nebula_data/sectors.py",
+          "sha256": "51b23d5de2600bf3272a59eb51d0b483a53bba0dd2ff2992f5677f2393b04ec2",
+          "bundled": [
+            "go/internal/fieldops/upstream/bioscan/nebula_sectors.py"
+          ]
+        },
+        {
+          "path": "LICENSE.txt",
+          "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643",
+          "bundled": [
+            "go/internal/fieldops/upstream/bioscan/LICENSE.txt"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "silarn-explodata",
+      "repository": "https://github.com/Silarn/EDMC-ExploData",
+      "revision": "fd4e188defd6405e46398fb0a54ac8669c9e2189",
+      "observedHead": "fd4e188defd6405e46398fb0a54ac8669c9e2189",
+      "checkedAt": "2026-11-24",
+      "status": "current",
+      "license": "GPL-2.0-or-later (load.py/const.py grant; LICENSE.txt is GPL-2.0); GPL-3.0 selected for ERIDION.",
+      "attribution": "Silarn, EDMC-ExploData",
+      "notes": "Genus names, clonal distances and colour (variant) dependencies. RegionMapData.py is not vendored (its region map is a separately attributed derivative), so region predicates stay unsupported.",
+      "files": [
+        {
+          "path": "src/ExploData/explo_data/bio_data/genus.py",
+          "sha256": "c3743ffa1017344cd6820b1e6d6efbea64ce4e4697f5db7ce640862638818af1",
+          "bundled": [
+            "go/internal/fieldops/upstream/explodata/genus.py"
+          ]
+        },
+        {
+          "path": "LICENSE.txt",
+          "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643",
+          "bundled": [
+            "go/internal/fieldops/upstream/explodata/LICENSE.txt"
+          ]
+        }
+      ]
     }
   ]
 }

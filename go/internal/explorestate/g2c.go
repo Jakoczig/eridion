@@ -43,9 +43,14 @@ type BodyDetails struct {
 	AtmosphereComposition []FractionView `json:"atmosphereComposition"`
 }
 type OrganismView struct {
+	// Genus, Species and Variant are localized labels; the *ID fields are
+	// the stable journal symbols (Task 6).
 	Genus          string `json:"genus"`
 	Species        string `json:"species"`
 	Variant        string `json:"variant"`
+	GenusID        string `json:"genusId"`
+	SpeciesID      string `json:"speciesId"`
+	VariantID      string `json:"variantId"`
 	Samples        *int   `json:"samples"`
 	Stage          string `json:"stage"`
 	Complete       bool   `json:"complete"`
@@ -278,7 +283,7 @@ func (m *Model) organic(target *systemState, context *contextState, e journal.Ev
 			target.overflow = true
 			return
 		}
-		body = &bodyState{view: BodyView{BodyID: id, Genuses: []string{}}}
+		body = &bodyState{view: BodyView{BodyID: id, Genuses: []string{}, GenusIDs: []string{}}}
 		target.bodies[id] = body
 	}
 	key := data.Genus + "\x00" + data.Species
@@ -324,6 +329,10 @@ func (m *Model) organic(target *systemState, context *contextState, e journal.Ev
 	organism.view.Genus = name(data.Genus_Localised, data.Genus)
 	organism.view.Species = name(data.Species_Localised, data.Species)
 	organism.view.Variant = name(data.Variant_Localised, data.Variant)
+	organism.view.GenusID, organism.view.SpeciesID = data.Genus, data.Species
+	if text(data.Variant) {
+		organism.view.VariantID = data.Variant
+	}
 	if context.activeOrganic != nil && context.activeOrganic != organism && !context.activeOrganic.view.Complete {
 		context.activeOrganic.view.Stage = "interrupted"
 		context.activeOrganic.view.Samples = nil
@@ -373,6 +382,7 @@ func CloneBody(b BodyView) BodyView {
 	b.PreviouslyDiscovered = copyPtr(b.PreviouslyDiscovered)
 	b.PreviouslyMapped = copyPtr(b.PreviouslyMapped)
 	b.Genuses = append([]string{}, b.Genuses...)
+	b.GenusIDs = append([]string{}, b.GenusIDs...)
 	b.Organisms = append([]OrganismView(nil), b.Organisms...)
 	for i := range b.Organisms {
 		b.Organisms[i].Samples = copyPtr(b.Organisms[i].Samples)

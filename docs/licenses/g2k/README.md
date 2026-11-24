@@ -8,13 +8,15 @@ license. They do not execute or install upstream EDMC/Python plugins.
 |---|---|---|
 | [Neutron Dancer — dwomble](https://github.com/dwomble/EDMC-NeutronDancer/tree/3b0bfc762b565397b71dc03fa9db1518c2c2c4d8) | `3b0bfc762b565397b71dc03fa9db1518c2c2c4d8` | CSV header/refuel/neutron workflow inspiration. MIT notice retained in NeutronDancer-LICENSE.txt. No route-generation API or router copied. |
 | [BGS-Tally — tezw21/aussig](https://github.com/aussig/BGS-Tally/tree/3a15d9738fee2cddcc2bb0ddc0823cf10615ae66) | `3a15d9738fee2cddcc2bb0ddc0823cf10615ae66` | Workflow inspiration; original typed journal transformations. MIT notice retained in BGS-Tally-LICENSE.txt. |
-| [EDMC-BioScan — Jeremy Rimpo](https://github.com/Silarn/EDMC-BioScan/tree/fc6b85c3de48c8fb79fa9e4f79ad780e48f56629) | `fc6b85c3de48c8fb79fa9e4f79ad780e48f56629` | 116 species' rules from `src/bio_scan/bio_data/rulesets/*.py`, converted literal data to bio-rules.json, with each source file hash retained there. README and load.py grant GPL-2.0-or-later; GPL-3.0 selected for this integration. BioScan-LICENSE.txt retained. |
-| [ExploData — Silarn](https://github.com/Silarn/EDMC-ExploData/tree/fd4e188defd6405e46398fb0a54ac8669c9e2189) | `fd4e188defd6405e46398fb0a54ac8669c9e2189` | Genus names and 23 reference distances from `src/ExploData/explo_data/bio_data/genus.py`. GPL-2.0-or-later grant in load.py/const.py, GPL-3.0 selected; ExploData-LICENSE.txt retained. No bundled SQLAlchemy/binary libraries copied. |
+| [EDMC-BioScan — Jeremy Rimpo](https://github.com/Silarn/EDMC-BioScan/tree/fc6b85c3de48c8fb79fa9e4f79ad780e48f56629) | `fc6b85c3de48c8fb79fa9e4f79ad780e48f56629` | All 119 sourced species (116 from `src/bio_scan/bio_data/rulesets/*.py`, 3 from `species.py`), guardian/tuber zones (`regions.py`) and nebula sector names (`nebula_data/sectors.py`). Since G3J these files are vendored byte-identical under `go/internal/fieldops/upstream/bioscan/` with their LICENSE.txt and converted to bio-rules.json by a literal-data parser (nothing executed); source hashes are recorded in bio-rules.json and upstream-sources.lock.json. README and load.py grant GPL-2.0-or-later; GPL-3.0 selected for this integration. BioScan-LICENSE.txt retained. |
+| [ExploData — Silarn](https://github.com/Silarn/EDMC-ExploData/tree/fd4e188defd6405e46398fb0a54ac8669c9e2189) | `fd4e188defd6405e46398fb0a54ac8669c9e2189` | Genus names, 23 reference distances and colour (variant) dependencies from `src/ExploData/explo_data/bio_data/genus.py`, vendored under `go/internal/fieldops/upstream/explodata/` since G3J. GPL-2.0-or-later grant in load.py/const.py, GPL-3.0 selected; ExploData-LICENSE.txt retained. No bundled SQLAlchemy/binary libraries or RegionMapData.py copied. |
 
-Only the licensed rule literals are redistributed; nebula maps, region maps,
-colors/variant predictions and separately sourced artwork/datasets are excluded.
-Rules needing region, stellar, nebula, body-distance or parent evidence remain
-unknown. Pinned criteria may be outdated and never establish confirmed species,
+Only the licensed data literals are redistributed. Nebula reference-star
+distances, the galactic region map and separately sourced artwork/datasets are
+excluded, so region predicates and nebula proximity (beyond sector names)
+remain unknown. Stellar, parent-star, body, zone and colour predicates are
+evaluated natively from journal evidence since G3J; see
+docs/testing/bioscan-conformance.md. Pinned criteria may be outdated and never establish confirmed species,
 probability, first-discovery bonus or guaranteed sale value. JSON is editable
 source data embedded in Go; no Python runtime or downloaded dependency is needed.
 

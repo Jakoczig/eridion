@@ -61,6 +61,7 @@ func (s *Store) RecordBioPosition(fid, system, body, name string, status []byte,
 	return e
 }
 func (s *Store) BioBody(ctx context.Context, fid, system, body string) (map[string]any, error) {
+	systemAddress := system
 	out := map[string]any{"version": fieldops.BioRuleVersion(), "candidates": []fieldops.Candidate{}, "samples": []BioSample{}, "notice": "Pinned community criteria may be outdated. Possible species are not confirmed. Sample location unknown unless a correlated Status snapshot exists."}
 	var raw string
 	e := s.reader.QueryRowContext(ctx, "SELECT raw_json FROM body_observations WHERE commander_fid=? AND system_address=? AND body_id=? AND json_extract(raw_json,'$.event')='Scan' ORDER BY source_event_id DESC LIMIT 1", fid, system, body).Scan(&raw)
@@ -157,6 +158,11 @@ func (s *Store) BioBody(ctx context.Context, fid, system, body string) (map[stri
 		}
 	}
 	out["samples"] = samples
+	systemEvidence, err := s.bioSystem(ctx, fid, systemAddress)
+	if err != nil {
+		return out, err
+	}
+	out["system"] = systemEvidence
 	// A missing genus stays unknown. Observed signal evidence is needed before
 	// environmental suggestions; the caller supplies it from the survey reducer.
 	out["scan"] = json.RawMessage(raw)
@@ -221,4 +227,46 @@ func (s *Store) bioCycleContinuous(ctx context.Context, fid, system, body string
 		want = 3
 	}
 	return next == target.Sequence+1 && organic == want, nil
+}
+
+// bioSystem returns the journal evidence about the body's system that the
+// BioScan criteria use: name and coordinates (Location/FSDJump), and the
+// latest Scan of each star and planet this commander observed there.
+func (s *Store) bioSystem(ctx context.Context, fid, system string) (fieldops.Environment, error) {
+	var env fieldops.Environment
+	var name sql.NullString
+	var x, y, z sql.NullFloat64
+	e := s.reader.QueryRowContext(ctx, "SELECT name,x,y,z FROM systems WHERE system_address=?", system).Scan(&name, &x, &y, &z)
+	if e != nil && e != sql.ErrNoRows {
+		return env, e
+	}
+	env.SystemName = name.String
+	if x.Valid && y.Valid && z.Valid {
+		env.Coords = &[3]float64{x.Float64, y.Float64, z.Float64}
+	}
+	rows, e := s.reader.QueryContext(ctx, `SELECT o.raw_json FROM body_observations o WHERE o.commander_fid=? AND o.system_address=? AND json_extract(o.raw_json,'$.event')='Scan' AND o.source_event_id=(SELECT max(p.source_event_id) FROM body_observations p WHERE p.commander_fid=o.commander_fid AND p.system_address=o.system_address AND p.body_id=o.body_id AND json_extract(p.raw_json,'$.event')='Scan') LIMIT 512`, fid, system)
+	if e != nil {
+		return env, e
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var raw string
+		if e = rows.Scan(&raw); e != nil {
+			return env, e
+		}
+		v := object([]byte(raw))
+		bodyName := text(v["BodyName"])
+		if star := text(v["StarType"]); star != "" {
+			st := fieldops.StarEvidence{BodyName: bodyName, Type: star, Luminosity: text(v["Luminosity"])}
+			if d, ok := v["DistanceFromArrivalLS"].(json.Number); ok {
+				if f, err := d.Float64(); err == nil {
+					st.DistanceLS = &f
+				}
+			}
+			env.Stars = append(env.Stars, st)
+		} else if class := text(v["PlanetClass"]); class != "" {
+			env.Planets = append(env.Planets, fieldops.PlanetEvidence{BodyName: bodyName, Class: class})
+		}
+	}
+	return env, rows.Err()
 }

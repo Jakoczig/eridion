@@ -46,10 +46,15 @@ func TestG2CViewerBodyDetailsAndBiologyAreAllowlisted(t *testing.T) {
 	defer cancel()
 	reply := callRPC(t, ctx, conn, "getGoExploration")
 	raw := reply["message"]
-	for _, secret := range []string{"PRIVATE_", "FID", "Commander", "Latitude", "Longitude", "SystemAddress", "Materials", "Journal.", "fixture-genus"} {
+	for _, secret := range []string{"PRIVATE_", "FID", "Commander", "Latitude", "Longitude", "SystemAddress", "Materials", "Journal."} {
 		if strings.Contains(string(raw), secret) {
 			t.Fatal("private metadata leaked", secret)
 		}
+	}
+	// Task 6: genus/species symbols are public codex identifiers and appear
+	// only in their explicit id fields, never as display labels.
+	if n, ids := strings.Count(string(raw), "fixture-genus"), strings.Count(string(raw), `"genusId":"fixture-genus"`); n != ids || ids == 0 {
+		t.Fatalf("genus symbol outside genusId (%d of %d): %s", ids, n, raw)
 	}
 	top := onlyKeys(t, raw, "systemName surveyState reportedBodyCount fssProgress allBodiesFound scannerBodyCount bodies truncated")
 	var bodies []json.RawMessage
@@ -58,7 +63,7 @@ func TestG2CViewerBodyDetailsAndBiologyAreAllowlisted(t *testing.T) {
 	for _, body := range bodies {
 		var optional map[string]json.RawMessage
 		json.Unmarshal(body, &optional)
-		keys := "name kind bodyId atmosphere volcanism landable terraformable gravityG distanceLS bioSignals geoSignals previouslyDiscovered previouslyMapped dssMapped genuses"
+		keys := "name kind bodyId atmosphere volcanism landable terraformable gravityG distanceLS bioSignals geoSignals previouslyDiscovered previouslyMapped dssMapped genuses genusIds"
 		if optional["details"] != nil {
 			keys += " details"
 		}
@@ -83,7 +88,7 @@ func TestG2CViewerBodyDetailsAndBiologyAreAllowlisted(t *testing.T) {
 			var organisms []json.RawMessage
 			json.Unmarshal(o, &organisms)
 			for _, o := range organisms {
-				onlyKeys(t, o, "genus species variant samples stage complete lastObservedAt")
+				onlyKeys(t, o, "genus species variant genusId speciesId variantId samples stage complete lastObservedAt")
 			}
 			seen = strings.Contains(string(o), "Fixture Bacterium") && strings.Contains(string(o), `"complete":true`)
 		}
