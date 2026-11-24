@@ -115,3 +115,34 @@ func TestRefreshKeepsManualCorrectionsAndNeedsRevision(t *testing.T) {
 		t.Fatal("manual file changed")
 	}
 }
+
+func TestFetchRefusesBundledDirAndTruncation(t *testing.T) {
+	root, l := fixtureRepo(t)
+	s := l.Sources[0]
+	if err := Fetch(s, locked, root, "go/internal/catalog", reply(200, "x")); err == nil || !strings.Contains(err.Error(), "bundled directory") {
+		t.Fatal("fetch into bundled dir:", err)
+	}
+	if err := Fetch(s, locked, root, filepath.Join(root, "resources"), reply(200, "x")); err == nil {
+		t.Fatal("fetch into bundled dir (absolute) accepted")
+	}
+	big := strings.Repeat("a", maxFetchBytes+1)
+	if err := Fetch(s, locked, root, t.TempDir(), reply(200, big)); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatal("oversized file accepted:", err)
+	}
+	out := t.TempDir()
+	if err := Fetch(s, locked, root, out, reply(200, "id,symbol,name\n")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRefreshLeavesHeadForCheck(t *testing.T) {
+	root, l := fixtureRepo(t)
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "x.csv"), []byte("id,symbol,name\n"), 0o644)
+	if err := Refresh(&l, "s", root, dir, "153e62426eb58b6cd23def535cb4b7e1082e777f"); err != nil {
+		t.Fatal(err)
+	}
+	if s := l.Sources[0]; s.Status != "unchecked" || s.ObservedHead != "" {
+		t.Fatalf("refresh claimed the head: %+v", s)
+	}
+}

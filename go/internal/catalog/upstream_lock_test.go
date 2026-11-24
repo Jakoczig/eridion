@@ -59,6 +59,7 @@ func TestUpstreamLockConformance(t *testing.T) {
 		"outfitting.csv":     "id,symbol,category,name,mount,guidance,ship,class,rating,entitlement",
 		"commodity.csv":      "id,symbol,category,name",
 		"microresources.csv": "id,symbol,category,English name",
+		"material.csv":       "id,symbol,rarity,type,category,name",
 	} {
 		b, _ := data.ReadFile(file)
 		rows, err := csv.NewReader(strings.NewReader(string(b))).ReadAll()

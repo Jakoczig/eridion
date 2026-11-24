@@ -27,3 +27,15 @@ G2M-A adds only the exact existing bundled `shipyard.csv` for human ship labels;
 - `entitlement-review.csv` is a manual, evidence-backed review of entitlement availability for EDDN station publication. It is not upstream data and the refresh tool never writes it.
 - Refresh only through `go run ./cmd/upstream-sources` (see `docs/testing/upstream-conformance.md`). FDevIDs carries no licence file; attribution to EDCD is retained in the README and the lock.
 - `modules.json` (Coriolis-derived stock statistics) was not refreshed; its upstream revision was never recorded (lock status `unpinned`). Identifying a module does not imply statistics coverage for it.
+
+### G3I review: per-ID availability review (2026-11-24)
+
+`inventory-id-review.csv` is a manual ERIDION record, not upstream data. Its
+watermark (129001930) is the highest ID in the catalogue reviewed before the
+G3I refresh. A blank or Horizons entitlement on a newer ID is not treated as
+evidence of public stock: the refresh added Mk II reward modules and
+pre-engineered variants that FDevIDs lists without an entitlement. Reviewed
+rows: SCO frame shift drives sizes 2-7, ratings E-A, ordinary (Frontier Update
+18.02 notes, https://www.elitedangerous.com/update-notes/4-0-18-02); Guardian
+Nanite Torpedo Pylons and the Experimental Weapon Stabiliser excluded
+(technology broker unlocks). Every other newer ID is unverified until reviewed.

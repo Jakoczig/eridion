@@ -8,7 +8,7 @@ This file records what ERIDION actually sends to and accepts from each external 
 | --- | --- |
 | Endpoint allowlist | `allowedEndpoint`: HTTPS only, no user-info or fragment, exact host and path. A request to any other URL fails before it is sent. Redirects are not followed. |
 | Transport | 8 s timeout per request; `User-Agent: ERIDION/<version>`; replies above 2 MiB are rejected. |
-| Rate limiting | A `429` sets a per-host cooldown from `Retry-After` (seconds or HTTP date, clamped to 1 min–1 h; 1 min if absent). During the cooldown no request goes to that host. Each capability also has a minimum interval (`IntervalSeconds`). |
+| Rate limiting | A `429` sets a per-host cooldown from `Retry-After`. The seconds form is honoured as given, capped at 1 h; the HTTP-date form is clamped to 1 min–1 h; the default is 1 min. During the cooldown no request goes to that host. Each capability also has a minimum interval (`IntervalSeconds`). |
 | Upload retries | Only an explicit `429`/`503` is retried, at most 3 times with exponential backoff (2, 4, 8 min plus jitter). After that the outcome is terminal `failed`. A timeout or transport error is `unknown_delivery` and is never retried silently, so an event cannot be delivered twice. |
 | Consent | Uploads are off by default. They are enabled per provider and per category, only for the commander the live journal has witnessed, and consent is stored in the history database. Read lookups run only when the owner asks for them. |
 | Credentials | API keys and tokens are kept in the OS vault (`vault_*.go`). They are never logged, never echoed into status, and never sent to any host but their own. |
@@ -29,7 +29,7 @@ No status below is live-verified. Automated tests never call production services
 | Endpoints | `https://auth.frontierstore.net/auth` (browser) and `/token`. `GET https://companion.orerve.net/{profile,market,shipyard,fleetcarrier,communitygoals}`. |
 | Auth | OAuth2 authorization code with PKCE. Redirect `https://eridion.fitoserver.org/auth/frontier/callback`; bearer access token. Refresh happens 30 s before expiry; a failed refresh asks the owner to reconnect. |
 | Gate | Needs Frontier developer approval of the client. Read-only: there are no write endpoints. |
-| Identity | `profile` must be read and match the selected, journal-witnessed commander (FID and name) before any other endpoint is used. CAPI module IDs are applied to the journal loadout only after commander, ship ID and slot are all verified (G3I Task 16). |
+| Identity | `profile` must be read and match the selected, journal-witnessed commander (FID and name) before any other endpoint is used. CAPI module IDs are applied to the journal loadout only after commander, ship ID and slot are all verified, and the ship binding is rechecked on every use (G3I Task 16). A verified ID the catalogue does not know leaves the module unresolved. |
 | Freshness | Snapshots carry the fetch time and outrank the journal while fresh (D0). |
 | Errors | A non-200 reply or a failed refresh leaves the previous state in place, with a status reason. |
 | Pagination | None. |
@@ -53,7 +53,7 @@ No status below is live-verified. Automated tests never call production services
 | Upload | `POST https://eddn.edcd.io:4430/upload/`. Schemas: `journal/1`, `commodity/3`, `outfitting/2` and `shipyard/2`, validated locally against the bundled EDCD schemas (BSD-3, pinned in `upstream-sources.lock.json`). |
 | Auth | None. An anonymous per-installation `uploaderID`. |
 | Acceptance | Any 2xx is accepted (the relay returns no per-message receipt). |
-| Station stock | MarketID is kept exactly. Complete-or-suppressed: each item is classified by exact FDevIDs numeric ID (`catalog.ClassifyInventory`). Ordinary stock is published in full. Items that depend on the commander, rank, PowerPlay, Guardian unlocks or tech-broker unlocks are omitted, as the outfitting/2 and shipyard/2 schemas require. An item that is unknown, has an ambiguous symbol or has an unreviewed entitlement suppresses the whole snapshot, and the reason is shown in the provider status. |
+| Station stock | MarketID is kept exactly. Complete-or-suppressed: each item is classified by exact FDevIDs numeric ID (`catalog.ClassifyInventory`). Ordinary stock is published in full. Items that depend on the commander, rank, PowerPlay, Guardian unlocks or tech-broker unlocks are omitted, as the outfitting/2 and shipyard/2 schemas require. An item that is unknown, has an ambiguous symbol or has an unreviewed entitlement suppresses the whole snapshot, and the reason is shown in the provider status. A generic entitlement (blank or Horizons) counts as public only for IDs in the reviewed pre-G3I catalogue; IDs added later need a row in `inventory-id-review.csv`. Shared symbols: the outfitting/2 list carries symbols, not IDs, so a published symbol can stand for any of its variants. |
 | Evidence | EDCD/EDDN `live` schemas. **fixture-verified**: synthetic fixtures only, no production uploads in tests. |
 
 ## Inara

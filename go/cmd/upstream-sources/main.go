@@ -2,7 +2,7 @@
 // ERIDION (Task 23, catalogue and provider-contract scope).
 //
 //	upstream-sources verify            offline: bundled bytes match the lock
-//	upstream-sources check             network: current / update available / unable to check
+//	upstream-sources check [-write]    network: current / update available / unable to check (-write records it)
 //	upstream-sources fetch  -source ID [-revision SHA] -out DIR
 //	upstream-sources diff   -source ID -dir DIR       reviewable report (no writes)
 //	upstream-sources refresh -source ID -dir DIR -revision SHA   explicit, rewrites bundled copies and the lock
@@ -72,6 +72,7 @@ func main() {
 	revision := fs.String("revision", "", "immutable upstream revision")
 	out := fs.String("out", "", "output directory for fetch")
 	dir := fs.String("dir", "", "directory holding fetched candidate files")
+	write := fs.Bool("write", false, "check: record the observed head and status in the lock")
 	_ = fs.Parse(os.Args[2:])
 	lock, err := readLock()
 	if err != nil {
@@ -88,9 +89,18 @@ func main() {
 		}
 		fmt.Println("ok: all bundled upstream files match", lockPath)
 	case "check":
-		for _, s := range lock.Sources {
+		for i, s := range lock.Sources {
 			status, head := Check(s, http.DefaultClient)
 			fmt.Printf("%-16s %-18s locked=%s head=%s\n", s.ID, status, short(s.Revision), short(head))
+			if *write && status != "unable_to_check" {
+				lock.Sources[i].Status, lock.Sources[i].ObservedHead = status, head
+				lock.Sources[i].CheckedAt = time.Now().UTC().Format("2006-01-02")
+			}
+		}
+		if *write {
+			if err := writeLock(lock); err != nil {
+				fail(err)
+			}
 		}
 	case "fetch":
 		s := find(lock, *source)
@@ -101,7 +111,7 @@ func main() {
 		if *out == "" {
 			fail(errors.New("-out required"))
 		}
-		if err := Fetch(s, rev, *out, http.DefaultClient); err != nil {
+		if err := Fetch(s, rev, ".", *out, http.DefaultClient); err != nil {
 			fail(err)
 		}
 	case "diff":
@@ -236,12 +246,41 @@ func advertisedHead(body []byte) string {
 	return ""
 }
 
+const maxFetchBytes = 16 << 20
+
+// insideBundled reports whether out resolves to (or inside) a directory that
+// holds bundled copies of s.
+func insideBundled(root, out string, s Source) (string, bool) {
+	o, err := filepath.Abs(filepath.Join(root, out))
+	if filepath.IsAbs(out) {
+		o, err = filepath.Abs(out)
+	}
+	if err != nil {
+		return "", true
+	}
+	for _, f := range s.Files {
+		for _, b := range f.Bundled {
+			d, err := filepath.Abs(filepath.Join(root, filepath.Dir(filepath.FromSlash(b))))
+			if err != nil {
+				return d, true
+			}
+			if rel, err := filepath.Rel(d, o); err == nil && (rel == "." || !strings.HasPrefix(rel, "..")) {
+				return d, true
+			}
+		}
+	}
+	return "", false
+}
+
 // Fetch downloads the locked files at revision into out, bounded in size and
 // time. It never writes inside the repository's bundled paths.
-func Fetch(s Source, revision, out string, client *http.Client) error {
+func Fetch(s Source, revision, root, out string, client *http.Client) error {
 	m := githubRepo.FindStringSubmatch(s.Repository)
 	if m == nil || !fullRevision.MatchString(revision) {
 		return errors.New("fetch needs a GitHub repository and a 40-character revision")
+	}
+	if dir, inside := insideBundled(root, out, s); inside {
+		return fmt.Errorf("-out %s is inside the bundled directory %s; fetch into a separate directory and review with diff", out, dir)
 	}
 	if err := os.MkdirAll(out, 0o755); err != nil {
 		return err
@@ -254,10 +293,13 @@ func Fetch(s Source, revision, out string, client *http.Client) error {
 		if err != nil {
 			return err
 		}
-		raw, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+		raw, err := io.ReadAll(io.LimitReader(resp.Body, maxFetchBytes+1))
 		resp.Body.Close()
 		if err != nil || resp.StatusCode != 200 {
 			return fmt.Errorf("%s: HTTP %d %v", f.Path, resp.StatusCode, err)
+		}
+		if len(raw) > maxFetchBytes {
+			return fmt.Errorf("%s exceeds %d bytes; nothing truncated is accepted", f.Path, maxFetchBytes)
 		}
 		dst := filepath.Join(out, filepath.FromSlash(f.Path))
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
@@ -466,9 +508,8 @@ func Refresh(l *Lock, id, root, dir, revision string) error {
 			}
 			f.SHA256 = digest(data[fi])
 		}
-		s.Revision, s.ObservedHead = revision, revision
-		s.CheckedAt = time.Now().UTC().Format("2006-01-02")
-		s.Status = "current"
+		// Whether this revision is the upstream head is for check to record.
+		s.Revision, s.ObservedHead, s.CheckedAt, s.Status = revision, "", "", "unchecked"
 		return nil
 	}
 	return fmt.Errorf("unknown source %q", id)
