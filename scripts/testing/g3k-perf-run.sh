@@ -7,7 +7,7 @@ out=$1 fx10k=$2 fx100k=$3 pw=$4 chrome=$5; shift 5
 mkdir -p "$out"
 cases=${G3K_CASES:-"launcher-idle dashboard-idle dashboard-hidden live-latency fsd-transitions tab-switch paired-1-same paired-2-same paired-2-different resume-reconnect"}
 here=$(cd "$(dirname "$0")" && pwd)
-for rep in 1 2 3; do
+for rep in ${G3K_REPS:-1 2 3}; do
   for spec in "$@"; do
     label=${spec%%=*}; rest=${spec#*=}
     host=$(echo "$rest" | cut -d, -f1); svc=$(echo "$rest" | cut -d, -f2 -s); flags=$(echo "$rest" | cut -d, -f3 -s)

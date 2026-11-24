@@ -14,7 +14,7 @@ import (
 	"github.com/Jakoczig/eridion/go/internal/perfstats"
 )
 
-func installedSpatial(t *testing.T) *SpatialManager {
+func installedSpatial(t testing.TB) *SpatialManager {
 	t.Helper()
 	files, key := spatialFixture(t)
 	client := &http.Client{Transport: transport(func(r *http.Request) (*http.Response, error) {
@@ -168,5 +168,28 @@ func TestPerfSpatialStaleVerifiedRecord(t *testing.T) {
 	m.ioMu.Unlock()
 	if len(needs) == 0 {
 		t.Fatal("planning trusted a stale verified record and planned no download")
+	}
+}
+
+// BenchmarkPerfSpatialPlanning compares one prefetch-planning pass done the
+// pre-G3K way (the full decoding query, points discarded) with planMissing,
+// on the same installed signed fixture (decoded-block cache cleared each
+// iteration so both pay first-read costs).
+func BenchmarkPerfSpatialPlanning(b *testing.B) {
+	m := installedSpatial(b)
+	q := SpatialQuery{Low: [3]float64{-2, -2, -2}, High: [3]float64{2, 2, 2}}
+	for _, mode := range []struct {
+		name   string
+		decode bool
+	}{{"query-then-discard", true}, {"planMissing", false}} {
+		b.Run(mode.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				m.ioMu.Lock()
+				m.cache = newSpatialCache()
+				m.walk(q, mode.decode)
+				m.ioMu.Unlock()
+			}
+		})
 	}
 }
