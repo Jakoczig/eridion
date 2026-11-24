@@ -47,6 +47,10 @@ type connDemand struct {
 func (d connDemand) allows(t topic) bool { return d.declared && d.visible && d.topics&t != 0 }
 
 type demandRegistry struct {
+	// apply serializes compute+apply so concurrent recomputes reach the game
+	// service in order (review R1). Lock order: apply, then mu, then the
+	// game service; the game service never calls back into demand.
+	apply sync.Mutex
 	mu    sync.Mutex
 	conns map[*websocket.Conn]connDemand
 	last  uint8
@@ -132,6 +136,8 @@ func (s *Server) recomputeDemand() {
 	if s.game == nil {
 		return
 	}
+	s.demand.apply.Lock()
+	defer s.demand.apply.Unlock()
 	union := topic(0)
 	if s.lowLatency() {
 		union |= viewTopics // bounded warm set: the four projection domains

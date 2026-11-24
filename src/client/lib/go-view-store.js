@@ -33,6 +33,7 @@ export function createGoViewStore (transport) {
   let generation = 0
   let declared = null
   let declareTimer = null
+  let failures = 0
   let hidden = documentHidden()
 
   const notify = entry => { for (const l of entry.listeners) l(entry.snapshot) }
@@ -68,7 +69,15 @@ export function createGoViewStore (transport) {
       if (next === declared) return
       declared = next
       generation++
-      transport.sendEvent('setGoDemand', { generation: String(generation), ...JSON.parse(next) }).catch(() => { declared = null })
+      transport.sendEvent('setGoDemand', { generation: String(generation), ...JSON.parse(next) }).then(() => { failures = 0 }).catch(() => {
+        // A failed replace (account switch, transient error) is retried
+        // with bounded backoff so the host never keeps an outdated demand
+        // (review R5).
+        if (declared !== next) return
+        declared = null
+        failures = Math.min(failures + 1, 5)
+        setTimeout(declare, 250 * 2 ** failures)
+      })
     }, 0)
   }
 
@@ -90,6 +99,10 @@ export function createGoViewStore (transport) {
     subscribe ({ rpc, changed, delta = null }, listener) {
       const key = rpc + '|' + changed + '|' + (delta ? delta.name : '')
       let entry = entries.get(key)
+      // First entry after the store emptied (for example after a reconnect,
+      // which unmounts every view): declare to the new connection even if
+      // the topics equal the last declaration (review R9).
+      if (entries.size === 0) declared = null
       if (!entry) {
         entry = { key, rpc, delta, listeners: new Set(), snapshot: EMPTY, liveSeen: false, latestDelta: null, pending: null }
         entries.set(key, entry)

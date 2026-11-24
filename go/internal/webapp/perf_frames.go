@@ -10,7 +10,13 @@ func recordFrame(value any, size int) {
 		if n, ok := m["name"].(string); ok && n != "" {
 			name = n
 			if _, isReply := m["requestId"]; isReply {
-				name = "rpc." + n
+				// Request names are client-controlled: count only known RPCs
+				// so a client cannot grow the counter set (review R2).
+				if gameplayRPC[n] || launcherRPC[n] {
+					name = "rpc." + n
+				} else {
+					name = "rpc.other"
+				}
 			}
 		}
 	}

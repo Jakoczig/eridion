@@ -2,6 +2,7 @@ package gamestate
 
 import (
 	"reflect"
+	"time"
 
 	"github.com/Jakoczig/eridion/go/internal/paritystate"
 	"github.com/Jakoczig/eridion/go/internal/perfstats"
@@ -50,6 +51,13 @@ func (s *Service) markDomainsLocked(mask uint8) { s.views.partial |= mask }
 // domainFreshLocked reports whether the last published value of a domain is
 // current, so a read can reuse it instead of rebuilding.
 func (s *Service) domainFreshLocked(bit uint8) bool {
+	if bit == DomainWorkspace {
+		// Frontier module evidence expires after its cache TTL even
+		// without a journal or sidecar change (review R4).
+		if c, ok := s.frontierModules[s.displayFIDLocked()]; ok && time.Since(c.at) >= 30*time.Second {
+			return false
+		}
+	}
 	return s.views.hasLast && !s.views.dirty && s.views.partial&bit == 0 && s.views.deferred&bit == 0 && s.views.lastKey == s.projectionKeyLocked() && !s.cachedImportLocked()
 }
 

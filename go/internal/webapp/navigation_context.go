@@ -15,6 +15,14 @@ func (s *Server) contextView(p socketPrincipal) any {
 	return map[string]any{"navigation": s.navContext.get(s.game.NavigationContext, s.account.current()), "policy": s.displayPolicy(p)}
 }
 
+// freshContextView builds the context now: an explicit read (for example
+// right after a jump) never receives the shared, up to 900 ms old copy
+// (review R6).
+func (s *Server) freshContextView(p socketPrincipal) any {
+	perfstats.Add("context.build", 1)
+	return map[string]any{"navigation": s.game.NavigationContext(), "policy": s.displayPolicy(p)}
+}
+
 // navContextMemo shares one navigation-context build among every connection
 // for up to navContextTTL (G3K PERF-06): the context is time-dependent
 // (FSD freshness), so connections still observe it at the existing one-second

@@ -1,9 +1,12 @@
 package atlas
 
 import (
+	"container/list"
 	"context"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -113,5 +116,57 @@ func TestPerfSpatialCacheBound(t *testing.T) {
 	c.put("huge", 3, 101)
 	if _, ok := c.get("huge"); ok {
 		t.Fatal("an entry above the budget was cached")
+	}
+}
+
+// Review R3: a block recorded as verified that later disappears from disk
+// (decoded entry already dropped from the LRU) is planned for download again
+// once a view finds it missing.
+func TestPerfSpatialStaleVerifiedRecord(t *testing.T) {
+	m := installedSpatial(t)
+	q := SpatialQuery{Low: [3]float64{-2, -2, -2}, High: [3]float64{2, 2, 2}}
+	if e := m.RemoveBubble(true); e != nil { // serve assets from disk only
+		t.Fatal(e)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		v, _ := m.View(q, true) // owner view downloads the viewport
+		if v.Complete {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("viewport download did not complete: %+v", v)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	// Drop decoded entries (as LRU eviction would) but keep verification,
+	// then remove one block file behind the manager's back.
+	m.ioMu.Lock()
+	m.cache.order.Init()
+	m.cache.items = map[string]*list.Element{}
+	m.cache.used = 0
+	var victim string
+	for h := range m.cache.verified {
+		if _, err := os.Stat(filepath.Join(m.root, "assets", "blocks", h+".z")); err == nil {
+			victim = h
+			break
+		}
+	}
+	m.cachedKey = ""
+	m.ioMu.Unlock()
+	if victim == "" {
+		t.Fatal("no downloaded block found")
+	}
+	if err := os.Remove(filepath.Join(m.root, "assets", "blocks", victim+".z")); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := m.View(q, false); v.Complete {
+		t.Fatalf("a missing block was reported complete: %+v", v)
+	}
+	m.ioMu.Lock()
+	needs, _ := m.planMissing(q)
+	m.ioMu.Unlock()
+	if len(needs) == 0 {
+		t.Fatal("planning trusted a stale verified record and planned no download")
 	}
 }

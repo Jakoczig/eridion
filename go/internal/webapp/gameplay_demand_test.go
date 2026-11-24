@@ -286,3 +286,46 @@ func TestPerfInitialSnapshotNotShared(t *testing.T) {
 	}
 	_ = a
 }
+
+// Review R1: concurrent demand changes are applied to the game service in
+// the order their unions were computed; the host never ends on a stale mask.
+func TestPerfDemandConcurrentApplyConsistent(t *testing.T) {
+	s, _ := demandFixture(t)
+	conns := make([]*websocket.Conn, 4)
+	for i := range conns {
+		conns[i] = dialScoped(t, s, "")
+	}
+	waitDemand(t, s, gamestate.DomainAll)
+	topics := [][]string{{"navigation"}, {"ship"}, {"navigation", "exploration"}, {"workspace"}, {}}
+	var wg sync.WaitGroup
+	for round := 1; round <= 40; round++ {
+		for i, c := range conns {
+			wg.Add(1)
+			go func(c *websocket.Conn, gen, k int) {
+				defer wg.Done()
+				d, _ := parseDemand(json.RawMessage(`{"generation":"` + itoa(gen) + `","visible":true,"topics":` + func() string { b, _ := json.Marshal(topics[k%len(topics)]); return string(b) }() + `}`))
+				s.updateDemand(c, d, false)
+			}(c, round, round+i)
+		}
+		wg.Wait()
+		s.demand.mu.Lock()
+		want := s.demand.last
+		s.demand.mu.Unlock()
+		if got := s.game.Demand(); got != want {
+			t.Fatalf("round %d: host demand %04b, registry %04b", round, got, want)
+		}
+	}
+}
+
+// Review R2: client-chosen request names never create new counters.
+func TestPerfFrameCounterNamesBounded(t *testing.T) {
+	perfstats.Reset()
+	for i := 0; i < 50; i++ {
+		recordFrame(map[string]any{"requestId": "x", "name": "random-" + itoa(i)}, 10)
+	}
+	recordFrame(map[string]any{"requestId": "x", "name": "getGoShip"}, 10)
+	c := perfstats.Take().Counters
+	if c["ws.frames.rpc.other"] != 50 || c["ws.frames.rpc.getGoShip"] != 1 || len(c) > 6 {
+		t.Fatalf("unbounded counter names: %v", c)
+	}
+}

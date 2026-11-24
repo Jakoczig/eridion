@@ -182,6 +182,7 @@ func (m *SpatialManager) walk(q SpatialQuery, decode bool) (SpatialView, []spati
 		} else {
 			raw, e := m.asset(need)
 			if e != nil {
+				delete(m.cache.verified, r.SHA256) // gone or corrupt since (review R3)
 				needs = append(needs, need)
 				continue
 			}
@@ -216,6 +217,7 @@ func (m *SpatialManager) walk(q SpatialQuery, decode bool) (SpatialView, []spati
 				continue
 			}
 			if _, e := m.asset(need); e != nil {
+				delete(m.cache.verified, d.SHA256)
 				needs = append(needs, need)
 				continue
 			}
@@ -229,6 +231,7 @@ func (m *SpatialManager) walk(q SpatialQuery, decode bool) (SpatialView, []spati
 		} else {
 			raw, e := m.asset(need)
 			if e != nil {
+				delete(m.cache.verified, d.SHA256) // gone or corrupt since (review R3)
 				needs = append(needs, need)
 				continue
 			}

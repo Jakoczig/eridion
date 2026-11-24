@@ -135,3 +135,26 @@ test('demand follows mounted views and visibility, not focus', async () => {
   assert.deepEqual(t.demands.at(-1).topics, ['community', 'providers', 'spatial'])
   store.dispose()
 })
+
+test('a failed demand declaration is retried; a new connection is always declared (review R5/R9)', async () => {
+  const f = fakeDocument(); global.document = f.doc; noWindow()
+  const { createGoViewStore } = loadStore()
+  const t = transport()
+  let fail = 1
+  const send = t.sendEvent
+  t.sendEvent = (name, message) => { if (name === 'setGoDemand' && fail-- > 0) { t.demands.push(message); return Promise.reject(new Error('Commander changed')) } return send(name, message) }
+  const store = createGoViewStore(t)
+  const stop = store.subscribe({ rpc: 'getGoNavigation', changed: 'goNavigationChanged' }, () => {})
+  await tick()
+  assert.equal(t.demands.length, 1)
+  await new Promise(resolve => setTimeout(resolve, 600))
+  assert.equal(t.demands.length, 2, 'the failed declaration was retried')
+  assert.deepEqual(t.demands[1].topics, t.demands[0].topics)
+  // Reconnect: every view unmounts, then mounts again with the same topics.
+  stop(); await tick()
+  const n = t.demands.length
+  const again = store.subscribe({ rpc: 'getGoNavigation', changed: 'goNavigationChanged' }, () => {})
+  await tick()
+  assert.ok(t.demands.length > n && t.demands.at(-1).topics.includes('navigation'), 'the new connection is declared')
+  again(); store.dispose()
+})

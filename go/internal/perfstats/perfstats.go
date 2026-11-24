@@ -121,14 +121,14 @@ func Names() []string {
 // Mutex is a sync.Mutex that records how long callers waited for it and how
 // long it was held, under "<name>.wait" and "<name>.hold".
 type Mutex struct {
-	mu     sync.Mutex
-	name   string
-	held   time.Time
-	inited bool
+	mu         sync.Mutex
+	wait, hold string
+	held       time.Time
+	inited     bool
 }
 
 // Named sets the series name (call once before use).
-func (m *Mutex) Named(name string) { m.name = name; m.inited = true }
+func (m *Mutex) Named(name string) { m.wait, m.hold, m.inited = name+".wait", name+".hold", true }
 
 // Lock acquires the mutex.
 func (m *Mutex) Lock() {
@@ -139,14 +139,14 @@ func (m *Mutex) Lock() {
 	start := time.Now()
 	m.mu.Lock()
 	now := time.Now()
-	Observe(m.name+".wait", now.Sub(start))
+	Observe(m.wait, now.Sub(start))
 	m.held = now
 }
 
 // Unlock releases the mutex.
 func (m *Mutex) Unlock() {
 	if m.inited {
-		Observe(m.name+".hold", time.Since(m.held))
+		Observe(m.hold, time.Since(m.held))
 	}
 	m.mu.Unlock()
 }

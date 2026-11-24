@@ -307,11 +307,13 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 			evaluate := func(p gamestate.Projections) bool {
 				d := s.connDemand(conn)
 				legacy := !d.declared
+				// Declared demand narrows, never widens, what a connection
+				// requested (review R7).
 				want := func(t topic, requested bool) bool {
 					if legacy {
 						return requested
 					}
-					return d.allows(t)
+					return d.allows(t) && requested
 				}
 				changed := func(cur, last uint64) bool { return first || cur != last || !s.g2e }
 				if want(topicNavigation, true) && changed(p.Revisions.Navigation, sent.Navigation) {
@@ -537,7 +539,7 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 				response["error"] = "Navigation context unavailable"
 			} else {
 				contextRequested.Store(true)
-				response["message"] = s.contextView(principal)
+				response["message"] = s.freshContextView(principal)
 			}
 		case "getGoSystem", "lookupGoSystem":
 			if !s.g2e || s.game == nil || s.community == nil {
