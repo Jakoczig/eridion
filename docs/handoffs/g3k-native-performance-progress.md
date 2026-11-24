@@ -118,17 +118,22 @@ See `docs/testing/g3k-native-performance.md`.
 
 Draft PR: [#33](https://github.com/Jakoczig/eridion/pull/33), `go/g3k-native-performance` → `go/g3j-bioscan-correctness`. Both workflows trigger for it (`b9ac835`).
 
-Source commit `74fa4ee0e99f3a055d4b3f2eb515c9e1d8613321` (all code, the report and raw data; this ledger before this section), attempt 1, no reruns:
+**Final source commit `41b7c4bb7d46956426e6e4bdfc10fb8138898785`** (all code, the gate fix, the report and raw data), attempt 1, no reruns:
 
-- [Go desktop foundation 45486177740](https://github.com/Jakoczig/eridion/actions/runs/45486177740): success on `ubuntu-24.04` and `windows-latest`. This includes Go tests and vet, the race detector, native smoke, and every browser and visual gate. The G3D map gate passed on Windows (no flake).
-- [ERIDION legacy compatibility CI 45486177986](https://github.com/Jakoczig/eridion/actions/runs/45486177986): success on all 5 jobs.
+- [Go desktop foundation 45492858676](https://github.com/Jakoczig/eridion/actions/runs/45492858676): success on `ubuntu-24.04` and `windows-latest` (Go tests and vet, race detector, native smoke, every browser and visual gate including G3D).
+- [ERIDION legacy compatibility CI 45492859138](https://github.com/Jakoczig/eridion/actions/runs/45492859138): success on all 5 jobs.
 
-Unsigned preview artifacts from run 45486177740:
+Unsigned preview artifacts from run 45492858676:
 
-- `eridion-g3e-Windows-x64-experimental-unsigned-preview` (id 14965786317)
-- `eridion-g3e-Linux-x64-experimental-unsigned-preview` (id 14965296193)
+- `eridion-g3e-Windows-x64-experimental-unsigned-preview` (id 14968466138)
+- `eridion-g3e-Linux-x64-experimental-unsigned-preview` (id 14967433372)
 
-They still carry the older G3E name because build identity is Task 10.
+They still carry the G3E name because build identity is Task 10.
+
+Earlier runs, for the record:
+
+- `74fa4ee` passed both workflows (runs 45486177740 and 45486177986).
+- The docs-only `d6f28c2` hit the G3D gate race on Windows (run 45489282846). It was investigated and fixed in `41b7c4b` (see section 2), with no blind rerun.
 
 The docs-only commit adding this section is verified in the PR description.
 
