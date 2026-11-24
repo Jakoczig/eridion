@@ -46,6 +46,7 @@ export default function GoGalaxy ({ context, route, sendEvent, role, policy = {}
   const searchSeq = useRef(0); const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const [atlas, setAtlas] = useState(null); const [atlasNotice, setAtlasNotice] = useState(''); const [spatial, setSpatial] = useState(null); const [refresh, setRefresh] = useState(0)
+  const spatialRef = useRef(null); spatialRef.current = spatial
   const area = useRef(null); const [size, setSize] = useState([320, 320]); const previousMode = useRef('galaxy')
   const galaxyEnabled = policy.galaxyMap !== false; const localEnabled = policy.localAtlas !== false
   const current = context?.current; const remaining = remainingRoute(context, route)
@@ -81,7 +82,22 @@ export default function GoGalaxy ({ context, route, sendEvent, role, policy = {}
   useEffect(() => {
     if (!wantsLocal) return
     let active = true; let timer
-    const load = () => sendEvent('getGoSpatialView', JSON.parse(spatialKey)).then(v => { if (!active) return; setSpatial({ ...v, key: spatialKey }); if (v.pending) timer = setTimeout(load, 600) }).catch(() => { if (active) setSpatial({ key: spatialKey, complete: false, pending: false, failed: true }) })
+    // G3K PERF-07: send the token of the view already held for this query;
+    // an unchanged reply keeps the same points (no repaint). Poll only until
+    // the viewport itself is ready; background prefetch progress arrives as
+    // goSpatialChanged and refreshes with the token.
+    const load = () => {
+      const held = spatialRef.current
+      const since = held && held.key === spatialKey && held.complete && held.viewToken ? held.viewToken : undefined
+      sendEvent('getGoSpatialView', since ? { ...JSON.parse(spatialKey), since } : JSON.parse(spatialKey)).then(v => {
+        if (!active) return
+        if (v.unchanged && held && held.key === spatialKey && held.viewToken === v.viewToken) {
+          if (held.prefetchPending !== v.prefetchPending || held.pending !== v.pending) setSpatial({ ...held, pending: v.pending, prefetchPending: v.prefetchPending })
+        } else if (!v.unchanged) setSpatial({ ...v, key: spatialKey })
+        const viewportPending = v.viewportReady === undefined ? v.pending : !v.viewportReady && (v.prefetchPending ?? v.pending)
+        if (viewportPending) timer = setTimeout(load, 600)
+      }).catch(() => { if (active) setSpatial({ key: spatialKey, complete: false, pending: false, failed: true }) })
+    }
     timer = setTimeout(load, 180)
     return () => { active = false; clearTimeout(timer) }
   }, [sendEvent, spatialKey, wantsLocal, refresh])

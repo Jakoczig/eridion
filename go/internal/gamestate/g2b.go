@@ -8,15 +8,17 @@ import (
 	"github.com/Jakoczig/eridion/go/internal/navcontext"
 	"github.com/Jakoczig/eridion/go/internal/navstate"
 	"github.com/Jakoczig/eridion/go/internal/paritystate"
+	"github.com/Jakoczig/eridion/go/internal/perfstats"
 	"github.com/Jakoczig/eridion/go/internal/shipstate"
 	"github.com/Jakoczig/eridion/go/internal/sidecar"
-	"reflect"
 	"sync"
 )
 
 // Projections is an internal, immutable, coalesced notification. Transport sends
 // only the separately typed allowlisted DTOs, never this service container.
 type Projections struct {
+	// Revisions identify each domain's published value (not sent to clients).
+	Revisions   Revisions
 	Workspace   *WorkspaceView
 	Ship        shipstate.View
 	Source      Summary
@@ -41,13 +43,21 @@ type projectionState struct {
 	subscribers map[chan Projections]struct{}
 	last        Projections
 	hasLast     bool
-	dirty       bool
+	// dirty: a change that may affect every domain. partial: changes
+	// confined to these domains. deferred: domains changed while nobody
+	// demanded them (their last value is outdated).
+	dirty             bool
+	partial, deferred uint8
+	demand            uint8
+	rev               Revisions
+	lastKey           projectionKey
 }
 
 func newProjectionState() projectionState {
-	return projectionState{parity: paritystate.NewModel(), activity: activitystate.NewModel(), ship: shipstate.NewModel(), navigation: navstate.NewModel(), exploration: explorestate.NewModel(), subscribers: map[chan Projections]struct{}{}, dirty: true}
+	return projectionState{parity: paritystate.NewModel(), activity: activitystate.NewModel(), ship: shipstate.NewModel(), navigation: navstate.NewModel(), exploration: explorestate.NewModel(), subscribers: map[chan Projections]struct{}{}, dirty: true, demand: DomainAll}
 }
 func (s *Service) projectionLocked() Projections {
+	perfstats.Add("projection.build", 1)
 	fid := s.displayFIDLocked()
 	if s.cachedProjection != nil && s.summary.ImportInProgress && fid != "" && fid == s.cachedProjectionFID {
 		p := cloneProjection(*s.cachedProjection)
@@ -62,82 +72,127 @@ func (s *Service) projectionLocked() Projections {
 		return p
 	}
 
-	p := Projections{Ship: s.views.ship.View(fid), Source: s.selectedSummaryLocked(), Navigation: s.views.navigation.View(fid)}
+	return Projections{Source: s.selectedSummaryLocked(), Ship: s.shipDomainLocked(fid), Navigation: s.navigationDomainLocked(fid), Exploration: s.explorationDomainLocked(fid), Workspace: s.workspaceDomainLocked(fid)}
+}
+
+// staleSource reports a source state whose projections are marked stale.
+func (s *Service) staleSourceLocked() bool {
+	return s.summary.SourceState != "live" && s.summary.SourceState != "replaying" && s.summary.SourceState != "partial" && s.summary.SourceState != "parse_warning"
+}
+
+// The domain builders below are the parts of the projection; each applies
+// its own replaying/stale/cached presentation exactly as the combined
+// projection did (G3K PERF-05: a change in one domain rebuilds only it).
+
+func (s *Service) shipDomainLocked(fid string) shipstate.View {
+	perfstats.Add("domain.build.ship", 1)
+	v := s.views.ship.View(fid)
+	if s.summary.ImportInProgress {
+		v = shipstate.View{Evidence: "replaying"}
+	} else if s.staleSourceLocked() {
+		v.Evidence = "stale_source"
+	}
+	if s.summary.Cached {
+		v.Evidence = "cached"
+	}
+	return v
+}
+
+func (s *Service) navigationDomainLocked(fid string) navstate.NavigationView {
+	perfstats.Add("domain.build.navigation", 1)
+	v := s.views.navigation.View(fid)
+	if s.summary.ImportInProgress {
+		v = navstate.NavigationView{RouteState: "replaying", TargetEvidence: "unknown", Hops: []navstate.Hop{}}
+	} else if s.staleSourceLocked() && !s.summary.Cached && (len(v.Hops) > 0 || v.TargetSystem != "") {
+		v.Hops = []navstate.Hop{}
+		v.DestinationSystem = ""
+		v.TargetSystem = ""
+		v.RemainingJumps = nil
+		v.ReportedRemainingJumps = nil
+		v.RouteState = "stale"
+		v.TargetEvidence = "unknown"
+	}
+	if s.summary.Cached && (v.RouteState == "verified_last_known" || v.RouteState == "verified") {
+		v.RouteState = "cached"
+		v.TargetEvidence = "cached"
+	}
+	return v
+}
+
+func (s *Service) explorationDomainLocked(fid string) explorestate.ExplorationView {
+	perfstats.Add("domain.build.exploration", 1)
 	address := s.unknown.systemAddress
 	if fid != "" {
 		address = s.commanders[fid].systemAddress
 	}
-	p.Exploration = s.views.exploration.View(fid, address)
-	if s.opts.EnableParity {
-		w := WorkspaceView{Parity: s.views.parity.View(fid), Activity: s.views.activity.View(fid), Exosuit: s.views.parity.Exosuit(fid)}
-		if refs := s.frontierModuleRefsLocked(fid); len(refs) > 0 && !s.summary.ImportInProgress {
-			w.Parity.Modules = paritystate.ReconcileModules(w.Parity.Modules, refs)
-		}
-		if s.summary.ImportInProgress {
-			w = WorkspaceView{Parity: paritystate.View{Evidence: "replaying"}, Activity: activitystate.View{Evidence: "replaying"}, Exosuit: s.views.parity.Exosuit(fid)}
-		} else if s.summary.SourceState != "live" && s.summary.SourceState != "partial" && s.summary.SourceState != "parse_warning" {
-			w.Parity.Evidence = "stale_source"
-			w.Parity.Status = paritystate.StatusView{State: "stale_source"}
-			w.Activity.Evidence = "stale_source"
-		}
-		p.Workspace = &w
+	v := s.views.exploration.View(fid, address)
+	if s.summary.ImportInProgress {
+		v = explorestate.ExplorationView{SurveyState: "replaying", Bodies: []explorestate.BodyView{}}
+	} else if s.staleSourceLocked() && len(v.Bodies) > 0 {
+		v.SurveyState = "stale_source"
+	}
+	if s.summary.Cached && v.SystemName != "" {
+		v.SurveyState = "cached"
+	}
+	return v
+}
+
+func (s *Service) workspaceDomainLocked(fid string) *WorkspaceView {
+	if !s.opts.EnableParity {
+		return nil
+	}
+	perfstats.Add("domain.build.workspace", 1)
+	w := WorkspaceView{Parity: s.views.parity.View(fid), Activity: s.views.activity.View(fid), Exosuit: s.views.parity.Exosuit(fid)}
+	if refs := s.frontierModuleRefsLocked(fid); len(refs) > 0 && !s.summary.ImportInProgress {
+		w.Parity.Modules = paritystate.ReconcileModules(w.Parity.Modules, refs)
 	}
 	if s.summary.ImportInProgress {
-		p.Ship = shipstate.View{Evidence: "replaying"}
-		p.Navigation = navstate.NavigationView{RouteState: "replaying", TargetEvidence: "unknown", Hops: []navstate.Hop{}}
-		p.Exploration = explorestate.ExplorationView{SurveyState: "replaying", Bodies: []explorestate.BodyView{}}
-	} else if s.summary.SourceState != "live" && s.summary.SourceState != "replaying" && s.summary.SourceState != "partial" && s.summary.SourceState != "parse_warning" {
-		p.Ship.Evidence = "stale_source"
-		if !s.summary.Cached && (len(p.Navigation.Hops) > 0 || p.Navigation.TargetSystem != "") {
-			p.Navigation.Hops = []navstate.Hop{}
-			p.Navigation.DestinationSystem = ""
-			p.Navigation.TargetSystem = ""
-			p.Navigation.RemainingJumps = nil
-			p.Navigation.ReportedRemainingJumps = nil
-			p.Navigation.RouteState = "stale"
-			p.Navigation.TargetEvidence = "unknown"
-		}
-		if len(p.Exploration.Bodies) > 0 {
-			p.Exploration.SurveyState = "stale_source"
-		}
+		w = WorkspaceView{Parity: paritystate.View{Evidence: "replaying"}, Activity: activitystate.View{Evidence: "replaying"}, Exosuit: s.views.parity.Exosuit(fid)}
+	} else if s.summary.SourceState != "live" && s.summary.SourceState != "partial" && s.summary.SourceState != "parse_warning" {
+		w.Parity.Evidence = "stale_source"
+		w.Parity.Status = paritystate.StatusView{State: "stale_source"}
+		w.Activity.Evidence = "stale_source"
 	}
-	if fid != s.active && p.Workspace != nil {
-		p.Workspace.Parity.Status = paritystate.StatusView{State: "different_account"}
+	if fid != s.active {
+		w.Parity.Status = paritystate.StatusView{State: "different_account"}
 	}
-	if p.Workspace != nil {
-		// Live suit telemetry requires the final, account-checked Status: a
-		// stale source, another account, embarking or shutdown remove it while
-		// known equipment stays available.
-		p.Workspace.Exosuit.Live = nil
-		if st := p.Workspace.Parity.Status; st.State == "known" && st.OnFoot != nil && !s.summary.Cached {
-			p.Workspace.Exosuit.Live = paritystate.CloneExosuit(paritystate.ExosuitView{Live: st.OnFoot}).Live
-		}
+	// Live suit telemetry requires the final, account-checked Status: a
+	// stale source, another account, embarking or shutdown remove it while
+	// known equipment stays available.
+	w.Exosuit.Live = nil
+	if st := w.Parity.Status; st.State == "known" && st.OnFoot != nil && !s.summary.Cached {
+		w.Exosuit.Live = paritystate.CloneExosuit(paritystate.ExosuitView{Live: st.OnFoot}).Live
 	}
 	if s.summary.Cached {
-		if p.Navigation.RouteState == "verified_last_known" || p.Navigation.RouteState == "verified" {
-			p.Navigation.RouteState = "cached"
-			p.Navigation.TargetEvidence = "cached"
-		}
-		p.Ship.Evidence = "cached"
-		if p.Workspace != nil {
-			p.Workspace.Parity.Evidence = "cached"
-			p.Workspace.Activity.Evidence = "cached"
-		}
-		if p.Exploration.SystemName != "" {
-			p.Exploration.SurveyState = "cached"
-		}
+		w.Parity.Evidence = "cached"
+		w.Activity.Evidence = "cached"
 	}
-	return p
+	return &w
 }
+
 func (s *Service) Navigation() navstate.NavigationView {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.projectionLocked().Navigation
+	if s.cachedImportLocked() {
+		return s.projectionLocked().Navigation
+	}
+	if s.domainFreshLocked(DomainNavigation) {
+		perfstats.Add("getter.reuse.navigation", 1)
+		return cloneProjection(Projections{Navigation: s.views.last.Navigation}).Navigation
+	}
+	return s.navigationDomainLocked(s.displayFIDLocked())
 }
 func (s *Service) Exploration() explorestate.ExplorationView {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.projectionLocked().Exploration
+	if s.cachedImportLocked() {
+		return s.projectionLocked().Exploration
+	}
+	if s.domainFreshLocked(DomainExploration) {
+		perfstats.Add("getter.reuse.exploration", 1)
+		return cloneProjection(Projections{Exploration: s.views.last.Exploration}).Exploration
+	}
+	return s.explorationDomainLocked(s.displayFIDLocked())
 }
 func (s *Service) applyProjectionsLocked(e journal.Event, phase journal.Phase) {
 	batch := s.startup.Observe(e)
@@ -170,11 +225,12 @@ func (s *Service) sidecarProjectionLocked(c sidecar.Change) {
 		if c.Kind == "Status" && !s.summary.ImportInProgress && s.summary.SourceState == "live" {
 			s.navigationContext.Status(s.active, s.views.parity.Status(s.active))
 		}
-		s.views.dirty = true
+		// Sidecars (Status, Cargo, ...) only feed the workspace model.
+		s.markDomainsLocked(DomainWorkspace)
 	}
 	if c.Kind == "NavRoute" {
 		s.views.navigation.ApplySidecar(c)
-		s.views.dirty = true
+		s.markDomainsLocked(DomainNavigation)
 	}
 }
 func (s *Service) resetProjectionsLocked() {
@@ -189,16 +245,45 @@ func (s *Service) resetProjectionsLocked() {
 	s.views.dirty = true
 }
 func (s *Service) publishProjectionsLocked() {
-	if !s.views.dirty && s.views.hasLast && s.views.last.Source.SourceState == s.summary.SourceState && s.views.last.Source.ImportInProgress == s.summary.ImportInProgress {
+	key := s.projectionKeyLocked()
+	whole := !s.views.hasLast || key != s.views.lastKey || s.cachedImportLocked()
+	if !whole && !s.views.dirty && s.views.partial == 0 {
 		return
 	}
-	p := s.projectionLocked()
+	var p Projections
+	build := DomainAll
+	if whole {
+		p = s.projectionLocked()
+		s.views.deferred = 0
+	} else {
+		changed := s.views.partial
+		if s.views.dirty {
+			changed = DomainAll
+		}
+		// Build only what a display (or the warm set) demands; defer the rest.
+		build = changed & s.views.demand
+		s.views.deferred |= changed &^ build
+		s.views.deferred &^= build
+		countBuilds(build)
+		p = s.buildDomainsLocked(build)
+	}
+	first := !s.views.hasLast || key != s.views.lastKey
 	s.views.dirty = false
-	if s.views.hasLast && reflect.DeepEqual(p.Workspace, s.views.last.Workspace) && reflect.DeepEqual(p.Ship, s.views.last.Ship) && reflect.DeepEqual(p.Navigation, s.views.last.Navigation) && reflect.DeepEqual(p.Exploration, s.views.last.Exploration) && p.Source.SourceState == s.views.last.Source.SourceState && p.Source.ImportInProgress == s.views.last.Source.ImportInProgress {
+	s.views.partial = 0
+	if !s.advanceRevisionsLocked(p, build, first) && p.Source.SourceState == s.views.last.Source.SourceState && p.Source.ImportInProgress == s.views.last.Source.ImportInProgress {
+		s.views.lastKey = key
 		return
 	}
+	p.Revisions = s.views.rev
 	s.views.last = p
+	s.views.lastKey = key
 	s.views.hasLast = true
+	perfstats.Add("projection.publish", 1)
+	if len(s.views.subscribers) == 0 {
+		return
+	}
+	// Each subscriber receives its own detached snapshot (mutations never
+	// cross subscribers); encoding is shared downstream by revision.
 	for ch := range s.views.subscribers {
 		select {
 		case ch <- cloneProjection(p):
@@ -292,17 +377,33 @@ func cloneProjection(p Projections) Projections {
 func (s *Service) Ship() shipstate.View {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.projectionLocked().Ship
+	if s.cachedImportLocked() {
+		return s.projectionLocked().Ship
+	}
+	if s.domainFreshLocked(DomainShip) {
+		perfstats.Add("getter.reuse.ship", 1)
+		return shipstate.Clone(s.views.last.Ship)
+	}
+	return s.shipDomainLocked(s.displayFIDLocked())
 }
 
 func (s *Service) Workspace() WorkspaceView {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	p := s.projectionLocked()
-	if p.Workspace == nil {
+	var w *WorkspaceView
+	switch {
+	case s.cachedImportLocked():
+		w = s.projectionLocked().Workspace
+	case s.domainFreshLocked(DomainWorkspace):
+		perfstats.Add("getter.reuse.workspace", 1)
+		w = cloneProjection(Projections{Workspace: s.views.last.Workspace}).Workspace
+	default:
+		w = s.workspaceDomainLocked(s.displayFIDLocked())
+	}
+	if w == nil {
 		return WorkspaceView{}
 	}
-	return *p.Workspace
+	return *w
 }
 
 func (s *Service) holdProjectionLocked(p Projections) {

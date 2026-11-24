@@ -13,6 +13,7 @@ import (
 	"github.com/Jakoczig/eridion/go/internal/navcontext"
 	"github.com/Jakoczig/eridion/go/internal/navstate"
 	"github.com/Jakoczig/eridion/go/internal/paritystate"
+	"github.com/Jakoczig/eridion/go/internal/perfstats"
 	"github.com/Jakoczig/eridion/go/internal/shipstate"
 	"os"
 	"time"
@@ -53,6 +54,7 @@ func uncached(v cacheCommander) commanderState {
 	return commanderState{v.System, v.SystemAddress, v.MarketID}
 }
 func (s *Service) cacheLocked() ([]byte, error) {
+	defer func(start time.Time) { perfstats.Observe("checkpoint.serialize", time.Since(start)) }(time.Now())
 	c := reducerCache{ActiveSource: s.activeSource, Format: reducerFormat, Summary: s.summary, Active: s.active, Stopped: s.stopped, Order: s.order, Unknown: cacheState(s.unknown), Commanders: map[string]cacheCommander{}, Ship: s.views.ship, Parity: s.views.parity, Activity: s.views.activity, Navigation: s.views.navigation, Exploration: s.views.exploration, Context: s.navigationContext}
 	for k, v := range s.commanders {
 		c.Commanders[k] = cacheState(v)
@@ -173,7 +175,9 @@ func (s *Service) CommitRecords(records []journal.Record, cp journal.Checkpoint)
 	s.summary.CachedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	after, err := s.cacheLocked()
 	if err == nil {
+		commitStart := time.Now()
 		err = s.store.Commit(context.Background(), cp, records, after)
+		perfstats.Observe("checkpoint.commit", time.Since(commitStart))
 	}
 	if err != nil {
 		_ = s.restoreCacheLocked(before)

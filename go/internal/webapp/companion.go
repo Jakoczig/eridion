@@ -20,6 +20,9 @@ type displayConfig struct {
 	AllViewers   bool     `json:"allViewers"`
 	Devices      []string `json:"devices"`
 	CloseMode    string   `json:"closeMode"`
+	// LowLatency ("Low latency: keep views ready", default off) keeps a
+	// bounded set of gameplay views prepared while no display shows them.
+	LowLatency bool `json:"lowLatency"`
 }
 type companionState struct {
 	mu       sync.Mutex
@@ -88,6 +91,8 @@ func (s *Server) saveDisplayConfig(raw []byte) error {
 	if s.companion.setClose != nil {
 		s.companion.setClose(c.CloseMode)
 	}
+	// The effective mode changes only after the configuration was saved.
+	go s.recomputeDemand()
 	return nil
 }
 func (s *Server) launcherView() any {

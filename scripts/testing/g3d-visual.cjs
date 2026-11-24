@@ -8,12 +8,17 @@ async function main () {
   const b = await browser(output); const c = b.client; let host; let origin = ''
   const evaluate = async expression => { const r = await c.call('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (r.exceptionDetails) throw Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text); return r.result.value }
   const click = text => evaluate(`Array.from(document.querySelectorAll('.go-galaxy-sidebar button, .go-fsd>.go-page__heading button')).find(b=>b.textContent===${JSON.stringify(text)})?.click()`)
+  const localEnabled = '(()=>{const b=Array.from(document.querySelectorAll(".go-galaxy-sidebar button")).find(b=>b.textContent==="Local");return !!b&&!b.disabled})()'
   const shot = async name => { const r = await c.call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }); await fs.writeFile(path.join(output, name + '.png'), Buffer.from(r.data, 'base64')) }
   const rpc = (name, message) => evaluate(`new Promise((resolve,reject)=>{const w=new WebSocket(location.origin.replace('http:','ws:')+'/?scope=launcher');w.onopen=()=>w.send(JSON.stringify({requestId:'g3d',name:${JSON.stringify(name)},message:${JSON.stringify(message)}}));w.onmessage=e=>{const r=JSON.parse(e.data);if(r.requestId==='g3d'){w.close();r.error?reject(Error(r.error)):resolve(r.message)}};w.onerror=reject})`)
   c.on(e => {
     if (e.method === 'Runtime.exceptionThrown') report.errors.push(e.params.exceptionDetails.exception?.description)
     if (e.method === 'Fetch.requestPaused') { const p = e.params; const ok = p.request.url.startsWith(origin + '/') || p.request.url.startsWith('data:'); if (!ok) report.external.push(p.request.url); c.call(ok ? 'Fetch.continueRequest' : 'Fetch.failRequest', ok ? { requestId: p.requestId } : { requestId: p.requestId, errorReason: 'BlockedByClient' }).catch(() => {}) }
   })
+  // Opt-in deterministic delayed-response fixture (G3K flake investigation):
+  // G3D_CONTEXT_DELAY=<ms> holds navigation-context messages during the
+  // first 20 s, reproducing a late centre on a slow runner. Off in CI.
+  if (process.env.G3D_CONTEXT_DELAY) await c.call('Page.addScriptToEvaluateOnNewDocument', { source: `const D=${Number(process.env.G3D_CONTEXT_DELAY)};const N=window.WebSocket;window.WebSocket=function(...a){const ws=new N(...a);let user=null;Object.defineProperty(ws,'onmessage',{configurable:true,get:()=>user,set:f=>{user=f}});ws.addEventListener('message',e=>{if(!user)return;if(performance.now()<20000&&/NavigationContext/.test(e.data))setTimeout(()=>user.call(ws,e),D);else user.call(ws,e)});return ws};window.WebSocket.prototype=N.prototype;Object.assign(window.WebSocket,{CONNECTING:0,OPEN:1,CLOSING:2,CLOSED:3})` })
   await c.call('Network.enable'); await c.call('Fetch.enable', { patterns: [{ urlPattern: '*' }] })
   // Only the browser spatial-view response is synthetic. All owner settings,
   // navigation, FSD episodes, permissions and lifecycle use the real Go fixture.
@@ -29,7 +34,11 @@ async function main () {
       const layout = await evaluate('(()=>{const box=e=>{const r=e.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}};return {sidebar:box(document.querySelector(\'.go-galaxy-sidebar\')),area:box(document.querySelector(\'.go-galaxy-area\')),planes:Array.from(document.querySelectorAll(\'.go-galaxy-plane>svg\')).map(box),controls:Array.from(document.querySelectorAll(\'.go-galaxy-sidebar button\')).map(box),header:!!document.querySelector(\'header\'),navigation:!!document.querySelector(\'.secondary-navigation\'),horizontalOverflow:document.querySelector(\'.go-galaxy-sidebar\').scrollWidth>document.querySelector(\'.go-galaxy-sidebar\').clientWidth}})()')
       if (layout.sidebar.right > layout.area.left + 1 || layout.planes.length !== 3 || layout.planes.some(p => p.right > width + 1 || p.bottom > height + 1) || layout.controls.some(p => p.height < 44) || layout.horizontalOverflow || !layout.header || !layout.navigation) throw Error('Touch layout regression ' + name + JSON.stringify(layout))
       report.layouts.push({ name, ...layout }); await shot('galaxy-' + name)
-      await evaluate('window.g3dLocal=true'); await click('Local'); await waitFor(() => evaluate('document.querySelector(".go-g3d").dataset.mode==="local"'))
+      // The Local control is (correctly) disabled until the selected
+      // commander's centre is known from the navigation context; click only
+      // once it is enabled (a click on a disabled button is a no-op). The
+      // wait is bounded; a control that never enables still fails here.
+      await evaluate('window.g3dLocal=true'); await waitFor(() => evaluate(localEnabled)); await click('Local'); await waitFor(() => evaluate('document.querySelector(".go-g3d").dataset.mode==="local"'))
       if (await evaluate('document.querySelectorAll(".go-galaxy-axes button").length') !== 6) throw Error('XYZ controls missing')
       await evaluate('document.querySelector(\'[aria-label="Increase X extent"]\').click()')
       await waitFor(() => evaluate('document.querySelector(".go-galaxy-axes")?.textContent.includes("250 LY")'))
@@ -66,6 +75,6 @@ async function main () {
     report.stableRequests = count; report.fsdDismissal = true; report.noRouteFSD = true; report.inspectionSurvivesFSD = true; report.bothDisabled = true
     if (report.errors.length || report.external.length) throw Error('Browser error or external traffic')
     report.passed = true; console.log(JSON.stringify(report))
-  } finally { report.diagnostic = await evaluate('({local:window.g3dLocal,requests:window.g3dRequests,text:document.body.innerText,mode:document.querySelector(".go-g3d")?.dataset.mode})').catch(() => null); if (host) await host.stop(); await b.stop(); await fs.writeFile(path.join(output, 'report.json'), JSON.stringify(report, null, 2)) }
+  } finally { report.diagnostic = await evaluate('({local:window.g3dLocal,requests:window.g3dRequests,text:document.body.innerText,mode:document.querySelector(".go-g3d")?.dataset.mode,localButtonEnabled:' + localEnabled + '})').catch(() => null); if (host) await host.stop(); await b.stop(); await fs.writeFile(path.join(output, 'report.json'), JSON.stringify(report, null, 2)) }
 }
 if (require.main === module) main().catch(e => { console.error(e); process.exitCode = 1 })

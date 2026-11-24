@@ -95,6 +95,9 @@ func (s *Server) providerRPC(ctx context.Context, name string, raw json.RawMessa
 		err = s.providers.SetCredential(req.ID, req.Credential)
 	case "disconnectGoProvider":
 		err = s.providers.Disconnect(req.ID, req.Remove)
+		if err == nil && req.ID == "frontier" && s.game != nil {
+			s.game.FrontierEvidenceChanged() // drop cached module evidence (review R4)
+		}
 	case "readGoProvider":
 		page := req.Page
 		if page == 0 {

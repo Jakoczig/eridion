@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"github.com/Jakoczig/eridion/go/internal/perfstats"
 	"sync"
 
 	"github.com/Jakoczig/eridion/go/internal/fieldops"
@@ -67,6 +68,7 @@ func (s *Service) bioCandidates(c bioContext, env fieldops.Environment, genera [
 		delete(b.entries, old)
 	}
 	b.computed++
+	perfstats.Add("bio.inference", 1)
 	b.mu.Unlock()
 	ok := false
 	defer func() {

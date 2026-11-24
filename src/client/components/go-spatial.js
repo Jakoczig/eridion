@@ -17,19 +17,68 @@ export function spatialSegments (route, frame) {
   }
   return result
 }
+// paintPoints aggregates points into image (RGBA, w x h) exactly as
+// spatialPixel places them (same bounds test, projection and clamping), with
+// no per-point allocation (G3K PERF-09). Returns the number painted.
+export function paintPoints (data, w, h, points, axes, frame) {
+  const a = 'xyz'.indexOf(axes[0]); const b = 'xyz'.indexOf(axes[1])
+  const [x0, x1] = frame.x; const [y0, y1] = frame.y; const [z0, z1] = frame.z
+  const [a0, a1] = frame[axes[0]]; const [b0, b1] = frame[axes[1]]
+  const aSpan = a1 - a0; const bSpan = b1 - b0
+  let painted = 0
+  for (let k = 0; k < points.length; k++) {
+    const p = points[k]
+    if (!p) continue
+    const px = p[0]; const py = p[1]; const pz = p[2]
+    if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz) || px < x0 || px >= x1 || py < y0 || py >= y1 || pz < z0 || pz >= z1) continue
+    const u = (p[a] - a0) / aSpan; const v = 1 - (p[b] - b0) / bSpan
+    const cx = Math.min(w - 1, Math.floor(u * w)); const cy = Math.min(h - 1, Math.floor(v * h))
+    const i = (cy * w + cx) * 4
+    data[i] = 168; data[i + 1] = 231; data[i + 2] = 253; data[i + 3] = Math.min(255, data[i + 3] + 130)
+    painted++
+  }
+  return painted
+}
+
+// SpatialCanvas paints verified XYZ positions. Paint requests (new data,
+// frame, size or DPR) coalesce into one animation frame; the ImageData is
+// reused while the size is unchanged; hidden documents are not painted and
+// are repainted once when visible; pending work is cancelled on unmount.
 export function SpatialCanvas ({ points, axes, frame, width, height }) {
   const ref = useRef(null)
+  const frameKey = JSON.stringify(frame)
   useEffect(() => {
     const canvas = ref.current; if (!canvas) return
-    const render = () => {
+    let pending = 0; let image = null; let alive = true
+    const paint = () => {
+      pending = 0
+      if (!alive || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) return
       const r = canvas.getBoundingClientRect(); const dpr = Math.min(2, window.devicePixelRatio || 1)
       const w = Math.max(1, Math.min(2048, Math.ceil(r.width * dpr))); const h = Math.max(1, Math.min(2048, Math.ceil(r.height * dpr)))
-      canvas.width = w; canvas.height = h; const ctx = canvas.getContext('2d'); const image = ctx.createImageData(w, h)
-      for (const p of points) { const at = spatialPixel(p, axes, frame, w, h); if (!at) continue; const i = (at[1] * w + at[0]) * 4; image.data[i] = 168; image.data[i + 1] = 231; image.data[i + 2] = 253; image.data[i + 3] = Math.min(255, image.data[i + 3] + 130) }
+      if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; image = null }
+      const ctx = canvas.getContext('2d')
+      if (!image || image.width !== w || image.height !== h) image = ctx.createImageData(w, h)
+      else image.data.fill(0)
+      paintPoints(image.data, w, h, points, axes, frame)
       ctx.putImageData(image, 0, 0); canvas.dataset.positions = String(points.length); canvas.dataset.mode = 'verified-xyz-pixel-aggregation'
+      canvas.dataset.paints = String((Number(canvas.dataset.paints) || 0) + 1)
     }
-    render(); const observer = new window.ResizeObserver(render); observer.observe(canvas); return () => observer.disconnect()
-  }, [points, axes, JSON.stringify(frame)])
+    const request = () => {
+      if (pending || !alive) return
+      pending = typeof window.requestAnimationFrame === 'function' ? window.requestAnimationFrame(paint) : setTimeout(paint, 16)
+    }
+    request()
+    const observer = typeof window.ResizeObserver === 'function' ? new window.ResizeObserver(request) : null
+    if (observer) observer.observe(canvas)
+    const onVisibility = () => { if (document.visibilityState !== 'hidden') request() }
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      alive = false
+      if (pending) { if (typeof window.cancelAnimationFrame === 'function') window.cancelAnimationFrame(pending); else clearTimeout(pending) }
+      if (observer) observer.disconnect()
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [points, axes, frameKey])
   return <foreignObject x='0' y='0' width={width} height={height} pointerEvents='none' data-spatial-projection={axes}><canvas ref={ref} style={{ width: '100%', height: '100%', display: 'block' }} aria-label='Verified EDSM XYZ positions; overlapping pixels aggregated' /></foreignObject>
 }
 const mib = n => `${((n || 0) / 1048576).toFixed(2)} MiB`

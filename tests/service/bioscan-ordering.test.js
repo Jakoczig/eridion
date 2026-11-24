@@ -22,12 +22,14 @@ function harness (initialBody = '5') {
     useRef: initial => { const i = cursor++; if (!(i in states)) states[i] = { current: initial }; return states[i] },
     useEffect: (callback, deps) => { const i = cursor++; if (!effects[i] || deps.some((v, j) => v !== effects[i].deps[j])) pending.set(i, { callback, deps }) }
   }
-  const filename = path.resolve(__dirname, '../../src/client/components/go-field-operations.js')
-  const code = transformSync(fs.readFileSync(filename, 'utf8'), { babelrc: false, configFile: false, presets: [[require('next/dist/compiled/babel/preset-react'), { runtime: 'automatic' }]], plugins: [require('next/dist/compiled/babel/plugin-transform-modules-commonjs')] }).code
-  const mod = new Module(filename, module); mod.filename = filename; mod.paths = module.paths
-  mod.require = name => name === 'react' ? react : require(name)
-  mod._compile(code, filename)
-  const { BioScanPanel } = mod.exports
+  const load = filename => {
+    const code = transformSync(fs.readFileSync(filename, 'utf8'), { babelrc: false, configFile: false, presets: [[require('next/dist/compiled/babel/preset-react'), { runtime: 'automatic' }]], plugins: [require('next/dist/compiled/babel/plugin-transform-modules-commonjs')] }).code
+    const mod = new Module(filename, module); mod.filename = filename; mod.paths = module.paths
+    mod.require = name => name === 'react' ? react : name.startsWith('.') ? load(path.resolve(path.dirname(filename), name + '.js')) : require(name)
+    mod._compile(code, filename)
+    return mod.exports
+  }
+  const { BioScanPanel } = load(path.resolve(__dirname, '../../src/client/components/go-field-operations.js'))
   const props = {
     connected: true,
     ready: true,
@@ -152,4 +154,27 @@ test('BioScan: a stale reply keeps the shown view and triggers one fresh read', 
     h.requests.at(-1).resolve(reply('5', 'FRESH')); await h.settle()
     assert.match(h.html(), /FRESH/)
   } finally { h.unmount() }
+})
+
+test('BioScan: live polling only during an active Log/Sample cycle on a visible display (G3K PERF-06)', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] })
+  const listeners = new Set()
+  global.document = { visibilityState: 'visible', addEventListener: (n, f) => listeners.add(f), removeEventListener: (n, f) => listeners.delete(f) }
+  const h = harness()
+  try {
+    await h.flush()
+    h.requests[0].resolve(reply('5', 'IDLE')); await h.settle()
+    t.mock.timers.tick(6000); await h.settle()
+    assert.equal(h.requests.length, 1, 'no polling without an active sampling cycle (journal invalidation covers changes)')
+    h.emit('journalSummaryChanged'); t.mock.timers.tick(250); await h.settle()
+    h.requests.at(-1).resolve(reply('5', 'SAMPLING', { samples: [{ stage: 'Log', at: 'x' }] })); await h.settle()
+    const before = h.requests.length
+    t.mock.timers.tick(1500); await h.settle()
+    assert.equal(h.requests.length, before + 1, 'polls during an active cycle')
+    h.requests.at(-1).resolve(reply('5', 'SAMPLING', { samples: [{ stage: 'Log', at: 'x' }] })); await h.settle()
+    global.document.visibilityState = 'hidden'
+    const hiddenCount = h.requests.length
+    t.mock.timers.tick(6000); await h.settle()
+    assert.equal(h.requests.length, hiddenCount, 'no polling while hidden')
+  } finally { h.unmount(); delete global.document }
 })

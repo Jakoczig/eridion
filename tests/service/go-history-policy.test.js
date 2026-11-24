@@ -16,6 +16,7 @@ function renderHistory (role) {
     mod.require = name => {
       if (name === 'react') return { ...React, useState: value => React.useState(stateIndex++ === 0 ? true : value) }
       if (name === './go-history-controls') return load('go-history-controls')
+      if (name === '../lib/visible-interval') return load('../lib/visible-interval')
       return require(name)
     }
     mod._compile(code, filename)

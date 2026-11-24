@@ -136,3 +136,33 @@ func TestAuditCommunityConsentChangeReachesOpenDisplays(t *testing.T) {
 		}
 	}
 }
+
+// G3K: the consent change also reaches a display that declared itself hidden
+// (view updates are held for hidden displays; privacy invalidations are not).
+func TestPerfConsentChangeReachesHiddenDisplays(t *testing.T) {
+	s, _ := searchServer(t, true, "9007199254740993")
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	main := dialScoped(t, s, "")
+	if r := rpcWithMessage(t, ctx, main, "getGoCommunity", map[string]any{}); len(r["error"]) != 0 {
+		t.Fatal(string(r["error"]))
+	}
+	if r := rpcWithMessage(t, ctx, main, "setGoDemand", map[string]any{"generation": "1", "visible": false, "topics": []string{}}); len(r["error"]) != 0 {
+		t.Fatal(string(r["error"]))
+	}
+	if err := s.community.SetEnabled(false); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		_, raw, err := main.Read(ctx)
+		if err != nil {
+			t.Fatal("a hidden display missed the consent change:", err)
+		}
+		var frame struct {
+			Name string `json:"name"`
+		}
+		if json.Unmarshal(raw, &frame) == nil && frame.Name == "goCommunityChanged" {
+			return
+		}
+	}
+}

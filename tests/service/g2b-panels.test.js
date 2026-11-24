@@ -11,7 +11,7 @@ const navigation = { currentSystem: 'Fixture <Alpha>', targetSystem: 'Fixture Be
 const exploration = { systemName: 'Fixture Alpha', surveyState: 'observed', reportedBodyCount: 12, fssProgress: 0.25, allBodiesFound: false, scannerBodyCount: null, truncated: false, bodies: [{ bodyId: '9007199254740997', name: 'Fixture Alpha 1', kind: 'Rocky body', landable: null, terraformable: null, gravityG: null, distanceLS: null, bioSignals: 3, geoSignals: 0, previouslyMapped: true, previouslyDiscovered: null, dssMapped: false, genuses: ['Bacterium'] }] }
 
 function harness (panel = 'go-navigation', initial = navigation) {
-  const states = []; const effects = []; const pending = new Map(); const calls = []; const listeners = new Map(); const copied = []
+  const states = []; const effects = []; const pending = new Map(); const calls = []; const demands = []; const listeners = new Map(); const copied = []
   let cursor = 0; let tree; let unsubscribed = 0
   const react = {
     ...React,
@@ -30,11 +30,12 @@ function harness (panel = 'go-navigation', initial = navigation) {
     const result = mod.exports(browser); cache.set(filename, result); return result
   }
   const component = load(path.resolve(__dirname, '../../src/client/components/' + panel + '.js')).default
-  const props = { connected: true, ready: true, role: 'viewer', sendEvent: async name => { calls.push(name); return initial }, eventListener: (name, callback) => { listeners.set(name, callback); return () => { listeners.delete(name); unsubscribed++ } } }
+  const props = { connected: true, ready: true, role: 'viewer', sendEvent: async (name, message) => { if (name === 'setGoDemand') { demands.push(message); return { applied: true } } calls.push(name); return initial }, eventListener: (name, callback) => { listeners.set(name, callback); return () => { listeners.delete(name); unsubscribed++ } } }
   const render = () => { cursor = 0; tree = component(props); return renderToStaticMarkup(tree) }
   return {
     props,
     calls,
+    demands,
     browser,
     copied,
     html: render,
@@ -48,7 +49,7 @@ function harness (panel = 'go-navigation', initial = navigation) {
 
 test('TestG2BRoutePageUsesOnlyGoProjection', async () => {
   const h = harness(); h.html(); const html = await h.flush()
-  assert.deepEqual(h.calls, ['getGoNavigation']); assert.match(html, /Fixture &lt;Alpha&gt;/); assert.match(html, /Fixture Beta/); assert.match(html, /Fixture Gamma/); assert.match(html, /5.*LY/); assert.match(html, /journal.only/i); assert.match(html, /Current|Next/)
+  assert.deepEqual(h.calls, ['getGoNavigation']); assert.deepEqual(h.demands.map(d => d.topics), [['community', 'navigation', 'providers', 'spatial']]); assert.equal(h.demands[0].visible, true); assert.match(html, /Fixture &lt;Alpha&gt;/); assert.match(html, /Fixture Beta/); assert.match(html, /Fixture Gamma/); assert.match(html, /5.*LY/); assert.match(html, /journal.only/i); assert.match(html, /Current|Next/)
   assert.doesNotMatch(html, /EDSM|Spansh|automatically target|credits|scoopable/i)
 })
 test('TestG2BExplorationPageDoesNotInventSpeciesOrRevenue', async () => {
@@ -64,7 +65,7 @@ test('TestG2BMissingOrClearedRouteStates', async () => {
 test('TestG2BDisconnectAndReconnectNoStaleResponse', async () => {
   for (const [panel, initial] of [['go-navigation', navigation], ['go-exploration-system', exploration]]) {
     const h = harness(panel, initial); let resolveOld
-    h.props.sendEvent = () => new Promise(resolve => { resolveOld = resolve })
+    h.props.sendEvent = name => name === 'setGoDemand' ? Promise.resolve({}) : new Promise(resolve => { resolveOld = resolve })
     h.html(); await h.flush(); h.props.connected = false; h.props.ready = false
     assert.doesNotMatch(h.html(), /Fixture/); assert.match(await h.flush(), /disconnected/i)
     h.props.sendEvent = async () => initial; h.props.connected = true; h.props.ready = true; h.html(); await h.flush()
@@ -79,7 +80,7 @@ test('TestG2BViewerCopyIsLocalOnly', async () => {
 })
 test('G2B live notification wins over delayed bootstrap reply', async () => {
   const h = harness(); let resolveReply
-  h.props.sendEvent = () => new Promise(resolve => { resolveReply = resolve }); h.html(); await h.flush(); h.broadcast({ ...navigation, currentSystem: 'Newest live system' }); resolveReply({ ...navigation, currentSystem: 'Stale bootstrap' })
+  h.props.sendEvent = name => name === 'setGoDemand' ? Promise.resolve({}) : new Promise(resolve => { resolveReply = resolve }); h.html(); await h.flush(); h.broadcast({ ...navigation, currentSystem: 'Newest live system' }); resolveReply({ ...navigation, currentSystem: 'Stale bootstrap' })
   const html = await h.flush(); assert.match(html, /Newest live system/); assert.doesNotMatch(html, /Stale bootstrap/)
 })
 

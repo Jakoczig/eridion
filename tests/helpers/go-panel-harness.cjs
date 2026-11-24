@@ -9,7 +9,7 @@ const navigation = { currentSystem: 'Fixture <Alpha>', targetSystem: 'Fixture Be
 const exploration = { systemName: 'Fixture Alpha', surveyState: 'observed', reportedBodyCount: 12, fssProgress: 0.25, allBodiesFound: false, scannerBodyCount: null, truncated: false, bodies: [{ bodyId: '9007199254740997', name: 'Fixture Alpha 1', kind: 'Rocky body', landable: null, terraformable: null, gravityG: null, distanceLS: null, bioSignals: 3, geoSignals: 0, previouslyMapped: true, previouslyDiscovered: null, dssMapped: false, genuses: ['Bacterium'] }] }
 
 function harness (panel = 'go-navigation', initial = navigation, exportName = 'default') {
-  const states = []; const effects = []; const pending = new Map(); const calls = []; const listeners = new Map(); const copied = []
+  const states = []; const effects = []; const pending = new Map(); const calls = []; const demands = []; const listeners = new Map(); const copied = []
   let cursor = 0; let tree; let unsubscribed = 0
   const react = {
     ...React,
@@ -37,12 +37,13 @@ function harness (panel = 'go-navigation', initial = navigation, exportName = 'd
     const result = mod.exports(browser); cache.set(filename, result); return result
   }
   const loaded = load(path.resolve(__dirname, '../../src/client/components/' + panel + '.js')); const component = loaded[exportName]
-  const props = { connected: true, ready: true, role: 'viewer', sendEvent: async name => { calls.push(name); return typeof initial === 'function' ? initial(name) : initial }, eventListener: (name, callback) => { listeners.set(name, callback); return () => { listeners.delete(name); unsubscribed++ } } }
+  const props = { connected: true, ready: true, role: 'viewer', sendEvent: async (name, message) => { if (name === 'setGoDemand') { demands.push(message); return { applied: true } } calls.push(name); return typeof initial === 'function' ? initial(name) : initial }, eventListener: (name, callback) => { listeners.set(name, callback); return () => { listeners.delete(name); unsubscribed++ } } }
   const render = () => { cursor = 0; tree = component(props); return renderToStaticMarkup(tree) }
   return {
     exports: loaded,
     props,
     calls,
+    demands,
     browser,
     copied,
     html: render,
