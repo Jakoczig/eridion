@@ -35,8 +35,24 @@ func TestUpstreamLockConformance(t *testing.T) {
 	if err := json.Unmarshal(raw, &lock); err != nil {
 		t.Fatal(err)
 	}
+	// Line-ending conversion (core.autocrlf on Windows checkouts) would change
+	// the bytes, so every bundled copy must be marked -text.
+	attrs, _ := os.ReadFile(filepath.Join(repoRoot, ".gitattributes"))
+	binary := map[string]bool{}
+	for _, line := range strings.Split(string(attrs), "\n") {
+		if f := strings.Fields(line); len(f) == 2 && f[1] == "-text" {
+			binary[f[0]] = true
+		}
+	}
 	seen := map[string]bool{}
 	for _, s := range lock.Sources {
+		for _, f := range s.Files {
+			for _, b := range f.Bundled {
+				if !binary[b] {
+					t.Errorf("%s is pinned but not marked -text in .gitattributes", b)
+				}
+			}
+		}
 		if seen[s.ID] || (s.Status == "current" && len(s.Revision) != 40) {
 			t.Fatalf("source %s: duplicate or unpinned current source", s.ID)
 		}

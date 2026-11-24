@@ -1,0 +1,19 @@
+# Pinned upstream data (upstream-sources.lock.json) must be byte-identical on
+# every platform: no line-ending conversion. Keep in sync with the lock;
+# TestUpstreamLockConformance checks it.
+go/internal/catalog/commodity.csv -text
+go/internal/catalog/material.csv -text
+go/internal/catalog/microresources.csv -text
+go/internal/catalog/modules.json -text
+go/internal/catalog/outfitting.csv -text
+go/internal/catalog/shipyard.csv -text
+go/internal/providers/schemas/LICENSE -text
+go/internal/providers/schemas/commodity-v3.0.json -text
+go/internal/providers/schemas/journal-v1.0.json -text
+go/internal/providers/schemas/outfitting-v2.0.json -text
+go/internal/providers/schemas/shipyard-v2.0.json -text
+resources/data/edcd/fdevids/commodity.csv -text
+resources/data/edcd/fdevids/material.csv -text
+resources/data/edcd/fdevids/microresources.csv -text
+resources/data/edcd/fdevids/outfitting.csv -text
+resources/data/edcd/fdevids/shipyard.csv -text
