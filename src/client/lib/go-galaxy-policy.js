@@ -1,13 +1,38 @@
 // Physical LY thresholds match bounded spatial inspection, not zoom-click counts.
 export const coordinates = p => p?.coordinates?.length === 3 && p.coordinates.every(v => Number.isFinite(v) && Math.abs(v) <= 1e6) ? p.coordinates : null
+// G3K PERF-09: context and route snapshots are immutable (shared view
+// store), so the result is memoized by their identity; names resolve through
+// a map that keeps the first point per name, exactly like Array.find.
+const routeMemo = new WeakMap()
+const nameMaps = new WeakMap()
+function pointsByName (context) {
+  const list = context?.points || []
+  if (!context || typeof context !== 'object') return new Map(list.map(p => [p.name, p]).reverse())
+  let map = nameMaps.get(context)
+  if (!map) {
+    map = new Map()
+    for (const p of list) if (p && !map.has(p.name)) map.set(p.name, p)
+    nameMaps.set(context, map)
+  }
+  return map
+}
 export function remainingRoute (context, route) {
+  const memoKey = route && typeof route === 'object' ? route : null
+  const cached = memoKey && context && typeof context === 'object' ? routeMemo.get(memoKey)?.get(context) : null
+  if (cached) return cached
   const usable = !route?.truncated && (!route?.routeState || ['verified', 'verified_last_known', 'cached'].includes(route.routeState))
   const hops = usable ? route?.hops || [] : []
   let start = hops.findIndex(h => h.isNext)
   if (start < 0) start = Math.max(0, hops.findIndex(h => h.isCurrent))
   const remaining = hops.slice(start)
-  const points = remaining.map(h => (context?.points || []).find(p => p.name === h.name))
-  return { rawPoints: points, points: points.filter(coordinates), complete: points.every(coordinates), count: remaining.length }
+  const byName = pointsByName(context)
+  const points = remaining.map(h => byName.get(h.name))
+  const result = { rawPoints: points, points: points.filter(coordinates), complete: points.every(coordinates), count: remaining.length }
+  if (memoKey && context && typeof context === 'object') {
+    if (!routeMemo.has(memoKey)) routeMemo.set(memoKey, new WeakMap())
+    routeMemo.get(memoKey).set(context, result)
+  }
+  return result
 }
 export function automaticFrame (current, remaining, full) {
   const points = [current, ...remaining.points].filter(coordinates)

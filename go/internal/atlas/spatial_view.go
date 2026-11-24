@@ -2,8 +2,12 @@ package atlas
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/Jakoczig/eridion/go/internal/perfstats"
 	"math"
 	"os"
@@ -18,6 +22,9 @@ type SpatialQuery struct {
 	High   [3]float64   `json:"high"`
 	Route  [][3]float64 `json:"route,omitempty"`
 	Target *[3]float64  `json:"target,omitempty"`
+	// Since is the viewToken of the view the client already holds; an
+	// unchanged complete view is then answered without coordinates.
+	Since string `json:"since,omitempty"`
 }
 type SpatialView struct {
 	Points   [][3]float64 `json:"points"`
@@ -30,6 +37,14 @@ type SpatialView struct {
 	Blocks   int          `json:"blocks"`
 	Decoded  int64        `json:"decodedBytes"`
 	Missing  int          `json:"missing"`
+	// G3K PERF-07: ViewportReady means the requested viewport is complete;
+	// PrefetchPending reports background adjacent/route downloads only.
+	// Unchanged replies carry no points: they confirm the client's view
+	// (identified by ViewToken), they are not an empty map.
+	ViewToken       string `json:"viewToken"`
+	Unchanged       bool   `json:"unchanged,omitempty"`
+	ViewportReady   bool   `json:"viewportReady"`
+	PrefetchPending bool   `json:"prefetchPending"`
 }
 type spatialNeed struct {
 	path  string
@@ -42,6 +57,9 @@ func validSpatialQuery(q SpatialQuery) bool {
 		if math.IsNaN(q.Low[i]) || math.IsInf(q.Low[i], 0) || math.IsNaN(q.High[i]) || math.IsInf(q.High[i], 0) || q.Low[i] < -1e6 || q.High[i] > 1e6 || q.Low[i] >= q.High[i] {
 			return false
 		}
+	}
+	if len(q.Since) > 64 {
+		return false
 	}
 	if len(q.Route) > 5 {
 		return false
@@ -60,6 +78,7 @@ func validSpatialQuery(q SpatialQuery) bool {
 	return true
 }
 func spatialQueryKey(q SpatialQuery, route bool) string {
+	q.Since = ""
 	if !route {
 		q.Route = nil
 		q.Target = nil
@@ -96,6 +115,24 @@ func (m *SpatialManager) asset(need spatialNeed) ([]byte, error) {
 // ioMu serializes lazy ZIP access, eviction, activation, and bounded query scratch.
 // mu is never held while acquiring ioMu, making shutdown/configuration cancellable.
 func (m *SpatialManager) query(q SpatialQuery) (SpatialView, []spatialNeed, map[string]bool) {
+	return m.walk(q, true)
+}
+
+// planMissing identifies the assets a query still needs without decoding
+// any point (G3K PERF-08): indexes are parsed (or reused), blocks are only
+// validated (length and hash) when not already decoded or verified.
+func (m *SpatialManager) planMissing(q SpatialQuery) ([]spatialNeed, map[string]bool) {
+	_, needs, pins := m.walk(q, false)
+	return needs, pins
+}
+
+// walk resolves q against the selected manifest. With decode it also builds
+// the visible points; limits, corruption and missing-asset handling are the
+// same in both modes. Caller holds ioMu.
+func (m *SpatialManager) walk(q SpatialQuery, decode bool) (SpatialView, []spatialNeed, map[string]bool) {
+	if m.cache == nil {
+		m.cache = newSpatialCache()
+	}
 	v := SpatialView{Points: [][3]float64{}, Source: "EDSM reported XYZ · 1/32 LY"}
 	pins := map[string]bool{}
 	needs := []spatialNeed{}
@@ -138,15 +175,23 @@ func (m *SpatialManager) query(q SpatialQuery) (SpatialView, []spatialNeed, map[
 		}
 		need := spatialNeed{spatialPath("indexes", r.SHA256), r.Bytes, r.SHA256}
 		pins[need.path] = true
-		raw, e := m.asset(need)
-		if e != nil {
-			needs = append(needs, need)
-			continue
-		}
-		blocks, e := parseSpatialIndex(raw, r, manifest.RootLY)
-		if e != nil {
-			v.Notice = e.Error()
-			return v, nil, pins
+		indexKey := fmt.Sprintf("i:%s:%v:%d", r.SHA256, r.Cell, manifest.RootLY)
+		var blocks []spatialBlock
+		if cached, ok := m.cache.get(indexKey); ok {
+			blocks = cached.([]spatialBlock)
+		} else {
+			raw, e := m.asset(need)
+			if e != nil {
+				needs = append(needs, need)
+				continue
+			}
+			blocks, e = parseSpatialIndex(raw, r, manifest.RootLY)
+			if e != nil {
+				v.Notice = e.Error()
+				return v, nil, pins
+			}
+			m.cache.markVerified(r.SHA256)
+			m.cache.put(indexKey, blocks, int64(len(blocks))*96+64)
 		}
 		for _, d := range blocks {
 			if overlap(lo, hi, d.Lo, d.Hi) {
@@ -163,16 +208,39 @@ func (m *SpatialManager) query(q SpatialQuery) (SpatialView, []spatialNeed, map[
 	for _, d := range descriptors {
 		need := spatialNeed{spatialPath("blocks", d.SHA256), d.Bytes, d.SHA256}
 		pins[need.path] = true
-		raw, e := m.asset(need)
-		if e != nil {
-			needs = append(needs, need)
+		blockKey := fmt.Sprintf("b:%s:%v:%v:%d", d.SHA256, d.Lo, d.Hi, d.Count)
+		cached, decoded := m.cache.get(blockKey)
+		if !decode {
+			// Planning: presence only; never materialize coordinates.
+			if decoded || m.cache.verified[d.SHA256] {
+				continue
+			}
+			if _, e := m.asset(need); e != nil {
+				needs = append(needs, need)
+				continue
+			}
+			m.cache.markVerified(d.SHA256)
+			perfstats.Add("spatial.plan.verified", 1)
 			continue
 		}
-		points, e := decodeESP(raw, d)
-		if e != nil {
-			v.Notice = e.Error()
-			v.Points = [][3]float64{}
-			return v, nil, pins
+		var points [][3]int32
+		if decoded {
+			points = cached.([][3]int32)
+		} else {
+			raw, e := m.asset(need)
+			if e != nil {
+				needs = append(needs, need)
+				continue
+			}
+			points, e = decodeESP(raw, d)
+			if e != nil {
+				v.Notice = e.Error()
+				v.Points = [][3]float64{}
+				return v, nil, pins
+			}
+			m.cache.markVerified(d.SHA256)
+			m.cache.put(blockKey, points, int64(len(points))*12+64)
+			perfstats.Add("spatial.decode", 1)
 		}
 		for _, p := range points {
 			inside := true
@@ -226,6 +294,7 @@ func (m *SpatialManager) View(q SpatialQuery, owner bool) (SpatialView, error) {
 		v = m.cached
 	} else {
 		v, needs, pins = m.query(q)
+		v.ViewToken = spatialViewToken(v, key)
 		if v.Complete {
 			m.cachedKey = key
 			m.cached = v
@@ -240,8 +309,29 @@ func (m *SpatialManager) View(q SpatialQuery, owner bool) (SpatialView, error) {
 	}
 	m.mu.Lock()
 	v.Pending = m.pending
+	v.PrefetchPending = m.pending
 	m.mu.Unlock()
+	v.ViewportReady = v.Complete
+	if v.Complete && q.Since != "" && q.Since == v.ViewToken {
+		perfstats.Add("spatial.unchanged", 1)
+		return SpatialView{Points: nil, Complete: true, Pending: v.Pending, Notice: v.Notice, Source: v.Source, Release: v.Release, Indexes: v.Indexes, Blocks: v.Blocks, Decoded: v.Decoded, ViewToken: v.ViewToken, Unchanged: true, ViewportReady: true, PrefetchPending: v.PrefetchPending}, nil
+	}
 	return v, nil
+}
+
+// spatialViewToken identifies a view's content: release, query, completeness
+// and coordinates. A different release, query or result never matches.
+func spatialViewToken(v SpatialView, key string) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "%s\x00%s\x00%s\x00%t\x00%d\x00%d\x00", v.Release, v.Source, key, v.Complete, v.Missing, len(v.Points))
+	var buf [24]byte
+	for _, p := range v.Points {
+		for i := range 3 {
+			binary.LittleEndian.PutUint64(buf[i*8:], math.Float64bits(p[i]))
+		}
+		h.Write(buf[:])
+	}
+	return hex.EncodeToString(h.Sum(nil))[:24]
 }
 
 // Only owner views initiate or reprioritize work. Viewer requests never mutate
@@ -306,7 +396,7 @@ func (m *SpatialManager) schedule(q SpatialQuery, needs []spatialNeed) {
 			}
 			for pass := 0; pass < 2; pass++ {
 				m.ioMu.Lock()
-				_, list, _ := m.query(w)
+				list, _ := m.planMissing(w)
 				m.ioMu.Unlock()
 				if len(list) == 0 {
 					break
@@ -440,6 +530,9 @@ func (m *SpatialManager) evict() {
 			if os.Remove(filepath.Join(m.root, filepath.FromSlash(e.path))) == nil {
 				total -= e.size
 				entries--
+				if m.cache != nil {
+					m.cache.forgetFiles() // a verified file is gone
+				}
 			}
 		}
 	}

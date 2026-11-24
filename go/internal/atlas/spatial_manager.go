@@ -85,6 +85,7 @@ type SpatialManager struct {
 	failures         map[string]int
 	pins             map[string]bool
 	cachedKey        string
+	cache            *spatialCache
 	cached           SpatialView
 	slots            chan struct{}
 	rateMu           sync.Mutex
@@ -442,6 +443,9 @@ func (m *SpatialManager) update(ctx context.Context, bubble bool, expected *spat
 	m.current = v
 	m.distributionData = d
 	m.cachedKey = ""
+	if m.cache != nil {
+		m.cache.reset()
+	}
 	m.lastError = ""
 	if m.queueCancel != nil {
 		m.queueCancel()
@@ -557,6 +561,9 @@ func (m *SpatialManager) Rollback() error {
 	m.current = v
 	m.distributionData = d
 	m.cachedKey = ""
+	if m.cache != nil {
+		m.cache.reset()
+	}
 	m.revision.Add(1)
 	if m.queueCancel != nil {
 		m.queueCancel()
@@ -582,6 +589,9 @@ func (m *SpatialManager) RemoveBubble(confirm bool) error {
 	}
 	m.state = s
 	m.cachedKey = ""
+	if m.cache != nil {
+		m.cache.reset()
+	}
 	m.revision.Add(1)
 	if m.bubble != nil {
 		m.bubble.Close()
