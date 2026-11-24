@@ -17,7 +17,12 @@ import (
 	"time"
 )
 
-const reducerFormat = shipstate.CacheFormat + paritystate.CacheFormat + activitystate.CacheFormat + navstate.CacheFormat + navcontext.CacheFormat + explorestate.CacheFormat
+// catalogIdentityFormat changes when cached projections must be rebuilt
+// because catalogue resolution changed (G3I: ID-first module identity on the
+// refreshed FDevIDs catalogue). The reducer mementos only hash private state.
+const catalogIdentityFormat = "catalog-identity-g3i-1"
+
+const reducerFormat = shipstate.CacheFormat + paritystate.CacheFormat + activitystate.CacheFormat + navstate.CacheFormat + navcontext.CacheFormat + explorestate.CacheFormat + catalogIdentityFormat
 
 type cacheCommander struct{ System, SystemAddress, MarketID string }
 type reducerCache struct {

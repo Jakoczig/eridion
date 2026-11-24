@@ -70,6 +70,9 @@ func (s *Service) projectionLocked() Projections {
 	p.Exploration = s.views.exploration.View(fid, address)
 	if s.opts.EnableParity {
 		w := WorkspaceView{Parity: s.views.parity.View(fid), Activity: s.views.activity.View(fid), Exosuit: s.views.parity.Exosuit(fid)}
+		if refs := s.frontierModuleRefsLocked(fid); len(refs) > 0 && !s.summary.ImportInProgress {
+			w.Parity.Modules = paritystate.ReconcileModules(w.Parity.Modules, refs)
+		}
 		if s.summary.ImportInProgress {
 			w = WorkspaceView{Parity: paritystate.View{Evidence: "replaying"}, Activity: activitystate.View{Evidence: "replaying"}, Exosuit: s.views.parity.Exosuit(fid)}
 		} else if s.summary.SourceState != "live" && s.summary.SourceState != "partial" && s.summary.SourceState != "parse_warning" {

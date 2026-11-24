@@ -26,6 +26,17 @@ type Module struct {
 	AmmoInHopper *int             `json:"ammoInHopper"`
 	Engineering  *Engineering     `json:"engineering"`
 	Reference    *ModuleReference `json:"reference"`
+	// Identity is the catalogue resolution (Task 16): exact_id,
+	// unique_symbol, standard_unengineered, ambiguous_variant or unknown.
+	Identity   string   `json:"identity,omitempty"`
+	ModuleID   string   `json:"moduleId,omitempty"`
+	Candidates []string `json:"candidates,omitempty"`
+}
+
+// ModuleRef is a module reported by another source with its exact numeric
+// ID (Frontier CAPI), for slot-verified reconciliation.
+type ModuleRef struct {
+	Slot, Item, ID string
 }
 type ModuleReference struct {
 	Source      string   `json:"source"`

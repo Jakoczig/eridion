@@ -28,15 +28,8 @@ func parseModules(d map[string]any) ([]Module, string) {
 			continue
 		}
 		mod := Module{Slot: slot, Item: item, Name: text(v["Item_Localised"]), Health: number(v["Health"], 0, 1), On: boolean(v["On"]), Priority: integer(v["Priority"], 10), AmmoInClip: integer(v["AmmoInClip"], 1000000), AmmoInHopper: integer(v["AmmoInHopper"], 1000000)}
-		if ref, ok := catalog.ModuleBySymbol(item); ok {
-			if mod.Name == "" {
-				mod.Name = ref.Name
-			}
-			mod.Reference = &ModuleReference{Source: ref.Source, Class: ref.Class, Rating: ref.Rating, MassT: ref.MassT, PowerMW: ref.PowerMW, Description: ref.Description}
-		}
-		if mod.Name == "" {
-			mod.Name = catalog.ModuleDisplayName(item)
-		}
+		_, engineered := v["Engineering"].(map[string]any)
+		applyResolution(&mod, catalog.ResolveModule(item, "", engineered), mod.Name == "")
 		if e, ok := v["Engineering"].(map[string]any); ok {
 			en := &Engineering{Blueprint: text(e["BlueprintName"]), Grade: integer(e["Level"], 5), Quality: number(e["Quality"], 0, 1), Experimental: text(e["ExperimentalEffect_Localised"]), Modifiers: []Modifier{}}
 			if en.Experimental == "" {
@@ -65,6 +58,48 @@ func parseModules(d map[string]any) ([]Module, string) {
 		out = append(out, mod)
 	}
 	return out, state
+}
+
+// applyResolution records a catalogue identification on mod. Reference
+// statistics attach only to an exact, unique or standard identification;
+// an ambiguous or unknown module keeps no stock statistics.
+func applyResolution(mod *Module, r catalog.Resolution, setName bool) {
+	mod.Identity, mod.ModuleID, mod.Candidates, mod.Reference = r.Status, r.ID, nil, nil
+	switch r.Status {
+	case catalog.StatusExactID, catalog.StatusUniqueSymbol, catalog.StatusStandardUnengineered:
+		ref := r.Module
+		mod.Reference = &ModuleReference{Source: ref.Source, Class: ref.Class, Rating: ref.Rating, MassT: ref.MassT, PowerMW: ref.PowerMW, Description: ref.Description}
+		if setName && ref.Name != "" {
+			mod.Name = ref.Name
+		}
+	case catalog.StatusAmbiguous:
+		mod.Candidates = append([]string(nil), r.Candidates...)
+	}
+	if setName && (mod.Name == "" || r.Status != catalog.StatusUnknown && r.Module.Name == "") {
+		mod.Name = catalog.ModuleDisplayName(mod.Item)
+	}
+}
+
+// ReconcileModules resolves modules with numeric IDs reported for the same
+// slot and symbol by another source (Frontier CAPI). The caller must first
+// verify that the reference describes the same commander and the same ship.
+// The input is not modified.
+func ReconcileModules(mods []Module, refs []ModuleRef) []Module {
+	out := make([]Module, len(mods))
+	for i, m := range mods {
+		out[i] = CloneModule(m)
+		for _, ref := range refs {
+			if ref.ID == "" || !strings.EqualFold(ref.Slot, m.Slot) || !strings.EqualFold(ref.Item, m.Item) {
+				continue
+			}
+			r := catalog.ResolveModule(m.Item, ref.ID, m.Engineering != nil)
+			if r.Status == catalog.StatusExactID {
+				applyResolution(&out[i], r, true)
+			}
+			break
+		}
+	}
+	return out
 }
 func parseCargo(d map[string]any) CargoView {
 	out := CargoView{State: "invalid", Items: []CargoItem{}}

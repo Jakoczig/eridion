@@ -25,32 +25,7 @@ func Clone(v View) View {
 	v.Ship = shipstate.Clone(v.Ship)
 	v.Modules = copySlice(v.Modules)
 	for i := range v.Modules {
-		m := &v.Modules[i]
-		m.Health = copyPtr(m.Health)
-		m.On = copyPtr(m.On)
-		m.Priority = copyPtr(m.Priority)
-		m.AmmoInClip = copyPtr(m.AmmoInClip)
-		m.AmmoInHopper = copyPtr(m.AmmoInHopper)
-		if m.Engineering != nil {
-			e := copyPtr(m.Engineering)
-			e.Grade = copyPtr(e.Grade)
-			e.Quality = copyPtr(e.Quality)
-			e.Modifiers = copySlice(e.Modifiers)
-			for j := range e.Modifiers {
-				mod := &e.Modifiers[j]
-				mod.Value = copyPtr(mod.Value)
-				mod.OriginalValue = copyPtr(mod.OriginalValue)
-				mod.LessIsGood = copyPtr(mod.LessIsGood)
-			}
-			m.Engineering = e
-		}
-		if m.Reference != nil {
-			r := copyPtr(m.Reference)
-			r.Class = copyPtr(r.Class)
-			r.MassT = copyPtr(r.MassT)
-			r.PowerMW = copyPtr(r.PowerMW)
-			m.Reference = r
-		}
+		v.Modules[i] = CloneModule(v.Modules[i])
 	}
 	v.Cargo.Count = copyPtr(v.Cargo.Count)
 	v.Cargo.Items = copySlice(v.Cargo.Items)
@@ -76,4 +51,36 @@ func cloneStatus(v StatusView) StatusView {
 	v.GuiFocus = copyPtr(v.GuiFocus)
 	v.OnFoot = cloneOnFoot(v.OnFoot)
 	return v
+}
+
+// CloneModule returns a detached copy of one module.
+func CloneModule(module Module) Module {
+	m := &module
+	m.Health = copyPtr(m.Health)
+	m.On = copyPtr(m.On)
+	m.Priority = copyPtr(m.Priority)
+	m.AmmoInClip = copyPtr(m.AmmoInClip)
+	m.AmmoInHopper = copyPtr(m.AmmoInHopper)
+	if m.Engineering != nil {
+		e := copyPtr(m.Engineering)
+		e.Grade = copyPtr(e.Grade)
+		e.Quality = copyPtr(e.Quality)
+		e.Modifiers = copySlice(e.Modifiers)
+		for j := range e.Modifiers {
+			mod := &e.Modifiers[j]
+			mod.Value = copyPtr(mod.Value)
+			mod.OriginalValue = copyPtr(mod.OriginalValue)
+			mod.LessIsGood = copyPtr(mod.LessIsGood)
+		}
+		m.Engineering = e
+	}
+	if m.Reference != nil {
+		r := copyPtr(m.Reference)
+		r.Class = copyPtr(r.Class)
+		r.MassT = copyPtr(r.MassT)
+		r.PowerMW = copyPtr(r.PowerMW)
+		m.Reference = r
+	}
+	m.Candidates = copySlice(m.Candidates)
+	return module
 }

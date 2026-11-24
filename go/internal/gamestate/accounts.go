@@ -7,6 +7,7 @@ import (
 	"errors"
 	"github.com/Jakoczig/eridion/go/internal/catalog"
 	"github.com/Jakoczig/eridion/go/internal/history"
+	"github.com/Jakoczig/eridion/go/internal/paritystate"
 	"github.com/Jakoczig/eridion/go/internal/privatefs"
 	"os"
 	"strconv"
@@ -430,4 +431,43 @@ func decimalText(v *float64) *string {
 	}
 	text := strconv.FormatFloat(*v, 'f', -1, 64)
 	return &text
+}
+
+type frontierModuleCache struct {
+	at   time.Time
+	refs []paritystate.ModuleRef
+}
+
+// frontierModuleRefsLocked returns the module IDs from fresh, validated
+// Frontier current-ship evidence for this commander, only when Frontier's
+// current ship is the journal's verified current ship (same ship ID).
+func (s *Service) frontierModuleRefsLocked(fid string) []paritystate.ModuleRef {
+	if fid == "" || s.store == nil {
+		return nil
+	}
+	if c, ok := s.frontierModules[fid]; ok && time.Since(c.at) < 30*time.Second {
+		return c.refs
+	}
+	var refs []paritystate.ModuleRef
+	ctx := context.Background()
+	if ship, ok := history.ResolveCurrentShip(s.factsLocked(ctx, fid)); ok && ship.ID != "" && ship.ID == s.views.ship.Identity(fid) {
+		for _, m := range ship.Modules {
+			refs = append(refs, paritystate.ModuleRef{Slot: m.Slot, Item: m.Item, ID: m.ID})
+		}
+	}
+	if s.frontierModules == nil {
+		s.frontierModules = map[string]frontierModuleCache{}
+	}
+	s.frontierModules[fid] = frontierModuleCache{at: time.Now(), refs: refs}
+	return refs
+}
+
+// invalidateFrontierModules drops cached Frontier module evidence (tests and
+// explicit provider refreshes) and forces the projections to rebuild.
+func (s *Service) invalidateFrontierModules() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.frontierModules = nil
+	s.cachedProjection = nil
+	s.views.dirty = true
 }
