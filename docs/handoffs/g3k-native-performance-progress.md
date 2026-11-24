@@ -43,6 +43,16 @@ Environment: Linux x86_64 (AMD Ryzen 5 9600X, 13 GB), Go 1.26.10, CGO with SQLit
 | A per-subscriber clone was briefly replaced by a single shared clone, which weakened the existing snapshot-independence contract. | `TestG2BBroadcastSnapshotsAreIndependent`. | Reverted before commit: each subscriber still gets its own snapshot. |
 | The g3c canvas gate read canvases synchronously after effects. | The g3c browser gate. | The gate now waits for the coalesced paint, then applies the same exact-position assertions. |
 
+### G3D map timing flake (recurred; investigated and fixed)
+
+The Windows-only G3D gate timeout seen in G3J recurred once on the docs-only G3K head `d6f28c2` (run 45489282846); the same code had passed on `74fa4ee`.
+
+- **Evidence.** The failure artifact showed the page still in Galaxy mode after the **Local** click, and no spatial request ever sent. The synthetic response was never involved.
+- **Root cause.** The Local control is disabled until the selected commander's centre is known from the navigation context. The gate clicked it right after the Galaxy layout step, so on a slow runner whose context arrived late the click hit a disabled button and did nothing.
+- **Deterministic reproduction.** A delayed-response fixture holds navigation-context messages for 6 s. With it, the unmodified gate failed twice at the CI failure point. CPU throttling (6×) alone did not reproduce the failure in six runs.
+- **Fix.** The gate waits, within the same 20 s bound, for the Local control to be enabled before clicking, and its failure diagnostics now include that state. A control that never enables still fails. The fixture is kept as an opt-in mode (`G3D_CONTEXT_DELAY=<ms>`); CI runs without it. With the fixture the fixed gate passed twice; without it, it passed as before.
+- **Product behaviour is unchanged:** Local stays unavailable until a centre is known.
+
 ## 3. Independent review
 
 A separate reviewer examined `aeb3e97..84a66c5` (all slices). It compared the domain builders line by line with the old combined projection, ran targeted Go and Node tests, and confirmed R1 with a probe in a scratch copy. No high-severity findings. All findings are fixed in `041e87b`.
