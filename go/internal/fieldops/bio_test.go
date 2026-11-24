@@ -10,7 +10,10 @@ func TestPinnedCriteriaRemainPossibleOrUnknownNeverConfirmed(t *testing.T) {
 	scan := map[string]any{"AtmosphereType": "CarbonDioxide", "PlanetClass": "High metal content body", "SurfaceTemperature": 180.0, "SurfaceGravity": 1.0, "Volcanism": "No volcanism"}
 	find := func() string {
 		t.Helper()
-		for _, c := range Infer(scan, []string{"$Codex_Ent_Stratum_Genus_Name;"}) {
+		// The parent star (F primary) decides Stratum's colour variant.
+		env := Environment{Body: scan, SystemName: "Fixture", Stars: []StarEvidence{{BodyName: "Fixture", Type: "F", DistanceLS: new(float64)}}}
+		scan["BodyName"] = "Fixture 1"
+		for _, c := range InferEnvironment(env, []string{"$Codex_Ent_Stratum_Genus_Name;"}) {
 			if c.Name == "Stratum Tectonicas" {
 				return c.State
 			}

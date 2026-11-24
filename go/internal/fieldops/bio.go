@@ -5,142 +5,210 @@ import (
 	_ "embed"
 	"encoding/json"
 	"math"
-	"strings"
+	"sort"
 	"time"
 )
 
 //go:embed bio-rules.json
 var bioRules []byte
 
+// Candidate is one sourced species for a body. Inference is the
+// three-valued result; State is the legacy display string kept for older
+// clients. Unknown lists the evidence or capability each unresolved
+// alternative still needs; Variants are the colour variants the evidence
+// allows (empty when not determined).
 type Candidate struct {
 	Genus     string           `json:"genus"`
 	Symbol    string           `json:"symbol"`
 	Name      string           `json:"name"`
 	State     string           `json:"state"`
+	Inference string           `json:"inference"`
 	Evidence  []string         `json:"evidence"`
+	Unknown   []string         `json:"unknown"`
+	Variants  []string         `json:"variants"`
 	MinimumM  *float64         `json:"minimumM"`
 	BaseValue *float64         `json:"baseValue"`
 	Criteria  []map[string]any `json:"criteria"`
 }
+
 type criteriaSpecies struct {
-	Genus, Symbol, Name string
-	Value               *float64
-	Rules               []map[string]any
+	Genus, Symbol, Name, File string
+	Value                     float64
+	Rulesets                  []map[string]any
+}
+type criteriaGenus struct {
+	ID, Name string
+	Distance float64
+	Colors   map[string]any
+}
+type criteriaZone struct {
+	Name         string
+	MinLY, MaxLY float64
+	Center       [3]float64
 }
 type criteriaPack struct {
-	GenusNames      map[string]string
-	Version, Notice string
-	Distances       map[string]float64
-	Species         []criteriaSpecies
+	Format                    int
+	Version, Notice           string
+	Genera                    []criteriaGenus
+	Species                   []criteriaSpecies
+	GuardianZones, TuberZones []criteriaZone
+	NebulaSectors             []string
+	genus                     map[string]criteriaGenus
 }
 
 var pack = func() criteriaPack {
 	var p criteriaPack
-	if json.Unmarshal(bioRules, &p) != nil {
+	if json.Unmarshal(bioRules, &p) != nil || p.Format != 2 || len(p.Species) == 0 {
 		panic("Invalid embedded BioScan criteria")
+	}
+	p.genus = map[string]criteriaGenus{}
+	for _, g := range p.Genera {
+		p.genus[g.ID] = g
 	}
 	return p
 }()
 
+// BioRuleVersion identifies the pinned rule data and native format.
 func BioRuleVersion() string { return pack.Version }
+
+// MinimumDistance is the genus's clonal colony distance (ExploData).
 func MinimumDistance(genus string) *float64 {
-	if v, ok := pack.Distances[genus]; ok && v > 0 {
+	if g, ok := pack.genus[genus]; ok && g.Distance > 0 {
+		v := g.Distance
 		return &v
 	}
 	return nil
 }
 
-// Infer only evaluates witnessed environmental fields. Unsupported criteria
-// remain unknown; an OR alternative cannot be dropped to produce a false match.
+// GenusName is the reference (English) genus name for a genus symbol, for
+// presentation fallback only; identity is always the symbol.
+func GenusName(genus string) string { return pack.genus[genus].Name }
+
+var legacyState = map[string]string{Possible: "possible by known criteria", Excluded: "excluded by a witnessed condition", Unknown: "unknown criteria"}
+
+// Infer evaluates the body's Scan fields alone (no system context), kept for
+// callers without system evidence: star, parent, body, zone and region
+// predicates then remain unknown.
 func Infer(scan map[string]any, genera []string) []Candidate {
+	return InferEnvironment(Environment{Body: scan}, genera)
+}
+
+// InferEnvironment evaluates every sourced species of the given genus
+// symbols (all species when genera is empty) against the evidence.
+func InferEnvironment(env Environment, genera []string) []Candidate {
+	e := newEvaluator(env)
 	out := []Candidate{}
+	wanted := map[string]bool{}
+	for _, g := range genera {
+		wanted[g] = true
+	}
+	genusVariants := map[string][]string{}
+	genusOutcome := map[string]outcome{}
 	for _, s := range pack.Species {
-		if len(genera) > 0 {
-			found := false
-			for _, g := range genera {
-				if g == s.Genus {
-					found = true
+		if len(wanted) > 0 && !wanted[s.Genus] {
+			continue
+		}
+		c := Candidate{Genus: s.Genus, Symbol: s.Symbol, Name: s.Name, Evidence: []string{"Pinned community criteria " + pack.Version}, Unknown: []string{}, Variants: []string{}, MinimumM: MinimumDistance(s.Genus), Criteria: s.Rulesets}
+		if s.Value > 0 {
+			v := s.Value
+			c.BaseValue = &v
+		}
+		result := fail
+		reasons := map[string]bool{}
+		if len(s.Rulesets) == 0 {
+			result = unknown
+			reasons["no sourced criteria"] = true
+		}
+		for _, rule := range s.Rulesets {
+			r := pass
+			missing := []string{}
+			for _, k := range sortedKeys(rule) {
+				o, why := e.predicate(k, rule[k])
+				r = combine(r, o)
+				if o == fail {
+					break
+				}
+				if o == unknown {
+					missing = append(missing, why)
 				}
 			}
-			if !found {
-				continue
+			if r == unknown {
+				for _, m := range missing {
+					reasons[m] = true
+				}
+			}
+			if r < result {
+				result = r
 			}
 		}
-		c := Candidate{Genus: s.Genus, Symbol: s.Symbol, Name: s.Name, State: "unknown criteria", Evidence: []string{}, MinimumM: MinimumDistance(s.Genus), BaseValue: s.Value, Criteria: s.Rules}
-		anyUnknown := len(s.Rules) == 0
-		matched := false
-		for _, rule := range s.Rules {
-			unknown, excluded := false, false
-			for k, want := range rule {
-				field := map[string]string{"atmosphere": "AtmosphereType", "body_type": "PlanetClass", "volcanism": "Volcanism", "min_temperature": "SurfaceTemperature", "max_temperature": "SurfaceTemperature", "min_gravity": "SurfaceGravity", "max_gravity": "SurfaceGravity", "min_pressure": "SurfacePressure", "max_pressure": "SurfacePressure"}[k]
-				if field == "" {
-					unknown = true
-					continue
-				}
-				if field == "Volcanism" && want != "None" {
-					unknown = true
-					continue
-				}
-				got, ok := scan[field]
-				if !ok {
-					unknown = true
-					continue
-				}
-				if strings.HasPrefix(k, "min_") || strings.HasPrefix(k, "max_") {
-					v, ok := floatValue(got)
-					n, nok := want.(float64)
-					if !ok || !nok {
-						unknown = true
-						continue
-					}
-					if field == "SurfaceGravity" {
-						v /= 9.80665
-					}
-					if field == "SurfacePressure" {
-						v /= 101325
-					}
-					if (strings.HasPrefix(k, "min_") && v < n) || (strings.HasPrefix(k, "max_") && v > n) {
-						excluded = true
-					}
-				} else {
-					v, ok := got.(string)
-					if !ok {
-						unknown = true
-						continue
-					}
-					if a, ok := want.([]any); ok {
-						found := false
-						for _, x := range a {
-							if x == v {
-								found = true
-							}
+		// Colour (variant) dependencies can still exclude a species.
+		if result != fail {
+			g := pack.genus[s.Genus]
+			if spec, ok := g.Colors["species"].(map[string]any); ok {
+				entry, _ := spec[s.Symbol].(map[string]any)
+				if table, ok := entry["star"].(map[string]any); ok {
+					found, complete := e.colours(table)
+					c.Variants = found
+					if len(found) == 0 {
+						if complete {
+							result = fail
+						} else {
+							result = combine(result, unknown)
+							reasons["parent star needed for colour"] = true
 						}
-						if !found {
-							excluded = true
+					}
+				} else if table, ok := entry["element"].(map[string]any); ok {
+					found, known := e.elements(table)
+					c.Variants = found
+					if len(found) == 0 {
+						if known {
+							result = fail
+						} else {
+							result = combine(result, unknown)
+							reasons["surface materials needed for colour"] = true
 						}
-					} else if want == "None" {
-						if v != "" && !strings.EqualFold(v, "None") && !strings.EqualFold(v, "No volcanism") {
-							excluded = true
-						}
-					} else {
-						unknown = true
 					}
 				}
-			}
-			if !excluded {
-				if unknown {
-					anyUnknown = true
-				} else {
-					matched = true
+			} else if table, ok := g.Colors["star"].(map[string]any); ok {
+				if _, done := genusOutcome[s.Genus]; !done {
+					found, complete := e.colours(table)
+					genusVariants[s.Genus] = found
+					switch {
+					case len(found) > 0:
+						genusOutcome[s.Genus] = pass
+					case complete:
+						genusOutcome[s.Genus] = fail
+					default:
+						genusOutcome[s.Genus] = unknown
+					}
+				}
+				c.Variants = genusVariants[s.Genus]
+				switch genusOutcome[s.Genus] {
+				case fail:
+					result = fail
+				case unknown:
+					result = combine(result, unknown)
+					reasons["parent star needed for colour"] = true
 				}
 			}
 		}
-		if matched {
-			c.State = "possible by known criteria"
-		} else if !anyUnknown {
-			c.State = "excluded by a witnessed condition"
+		switch result {
+		case pass:
+			c.Inference = Possible
+		case fail:
+			c.Inference = Excluded
+		default:
+			c.Inference = Unknown
+			for r := range reasons {
+				c.Unknown = append(c.Unknown, r)
+			}
+			sort.Strings(c.Unknown)
 		}
-		c.Evidence = append(c.Evidence, "Pinned environmental rules "+pack.Version, "Regional, stellar, parent and nebula requirements are unknown when needed; never a probability")
+		if c.Variants == nil {
+			c.Variants = []string{}
+		}
+		c.State = legacyState[c.Inference]
+		c.Evidence = append(c.Evidence, "Possible is a community suggestion, never a confirmed observation")
 		out = append(out, c)
 		if len(out) >= 128 {
 			break
@@ -148,6 +216,7 @@ func Infer(scan map[string]any, genera []string) []Candidate {
 	}
 	return out
 }
+
 func floatValue(x any) (float64, bool) {
 	var v float64
 	switch x := x.(type) {

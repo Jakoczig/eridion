@@ -83,6 +83,7 @@ type Service struct {
 	statisticsKey       string
 	statisticsJSON      []byte
 	bioStatus           []byte
+	bioCache            bioInference
 	maintenance         chan maintenanceRequest
 	hasFreshLive        bool
 	activeSource        string

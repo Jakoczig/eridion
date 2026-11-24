@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/gob"
 	"os"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -131,4 +133,82 @@ func mustBio(t *testing.T, s *Service) map[string]any {
 		t.Fatal(err)
 	}
 	return v
+}
+
+// Task 18 (backend): identical concurrent BioScan reads share one inference;
+// different evidence never reuses a cached result; cache keys never cross
+// commanders.
+func TestAuditBioInferenceSingleFlight(t *testing.T) {
+	dir, profile := t.TempDir(), t.TempDir()
+	bioJournal(t, dir, "Bacterium")
+	writeAccounts(t, profile, `{"version":2,"multiple":false,"selected":"","defaultFID":"SYNTHETIC-A"}`)
+	s, _, stop := recordingService(t, profile, dir)
+	defer stop()
+	waitState(t, s, func(v Summary) bool { return !v.ImportInProgress && v.EventsRead == 4 })
+	var wg sync.WaitGroup
+	results := make([][]fieldops.Candidate, 8)
+	for i := range results {
+		wg.Add(1)
+		go func(i int) { defer wg.Done(); results[i] = bioCandidates(t, s) }(i)
+	}
+	wg.Wait()
+	s.bioCache.mu.Lock()
+	computed := s.bioCache.computed
+	s.bioCache.mu.Unlock()
+	if computed != 1 {
+		t.Fatalf("8 identical reads ran %d inferences", computed)
+	}
+	for i := range results {
+		if len(results[i]) == 0 || len(results[i]) != len(results[0]) {
+			t.Fatalf("read %d differs", i)
+		}
+	}
+	results[0][0].Unknown = append(results[0][0].Unknown, "MUTATED")
+	if again := bioCandidates(t, s); strings.Contains(strings.Join(again[0].Unknown, ","), "MUTATED") {
+		t.Fatal("cached candidates shared with a caller")
+	}
+	// New evidence (FSS complete) changes the key and recomputes.
+	appendEvent(t, dir, `{"event":"FSSAllBodiesFound","timestamp":"2026-11-24T10:00:05Z","SystemName":"Fixture Bio","SystemAddress":9007199254740993,"Count":1}`)
+	waitState(t, s, func(v Summary) bool { return v.EventsRead == 5 })
+	bioCandidates(t, s)
+	s.bioCache.mu.Lock()
+	computed = s.bioCache.computed
+	s.bioCache.mu.Unlock()
+	if computed != 2 {
+		t.Fatalf("changed evidence reused a cached result (computed=%d)", computed)
+	}
+	env := fieldops.Environment{Body: map[string]any{"PlanetClass": "Rocky body"}}
+	if bioKey(bioContext{fid: "SYNTHETIC-A", system: "1", body: "5"}, env, nil) == bioKey(bioContext{fid: "SYNTHETIC-B", system: "1", body: "5"}, env, nil) {
+		t.Fatal("cache key shared across commanders")
+	}
+}
+
+// Task 18: disabling the BioScan module stops presentation only; journal
+// ingestion keeps recording samples, which reappear when it is re-enabled.
+func TestAuditBioModuleToggleKeepsIngestion(t *testing.T) {
+	dir, profile := t.TempDir(), t.TempDir()
+	bioJournal(t, dir, "Bacterium")
+	writeAccounts(t, profile, `{"version":2,"multiple":false,"selected":"","defaultFID":"SYNTHETIC-A"}`)
+	s, _, stop := recordingService(t, profile, dir)
+	defer stop()
+	waitState(t, s, func(v Summary) bool { return !v.ImportInProgress && v.EventsRead == 4 })
+	store, _ := s.History()
+	if err := store.SetBuiltinModule("bioscan", false); err != nil {
+		t.Fatal(err)
+	}
+	if v := mustBio(t, s); v["notice"] != "BioScan module disabled; stored observations retained" {
+		t.Fatalf("disabled module: %v", v["notice"])
+	}
+	appendEvent(t, dir, `{"event":"ScanOrganic","timestamp":"2026-11-24T10:00:06Z","ScanType":"Log","Genus":"$Codex_Ent_Bacterial_Genus_Name;","Species":"$Codex_Ent_Bacterial_06_Name;","SystemAddress":9007199254740993,"Body":5}`)
+	waitState(t, s, func(v Summary) bool { return v.EventsRead == 5 })
+	if err := store.SetBuiltinModule("bioscan", true); err != nil {
+		t.Fatal(err)
+	}
+	v := mustBio(t, s)
+	if samples := v["samples"].([]history.BioSample); len(samples) != 1 || samples[0].Stage != "Log" {
+		t.Fatalf("sample recorded while disabled was lost: %+v", v["samples"])
+	}
+	if len(v["candidates"].([]fieldops.Candidate)) == 0 {
+		t.Fatal("candidates not restored after re-enable")
+	}
 }
