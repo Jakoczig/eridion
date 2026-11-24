@@ -106,4 +106,28 @@ See `docs/testing/g3k-native-performance.md`.
 
 ## 7. CI and draft PR
 
-Pending.
+Draft PR: [#33](https://github.com/Jakoczig/eridion/pull/33), `go/g3k-native-performance` → `go/g3j-bioscan-correctness`. Both workflows trigger for it (`b9ac835`).
+
+Source commit `74fa4ee0e99f3a055d4b3f2eb515c9e1d8613321` (all code, the report and raw data; this ledger before this section), attempt 1, no reruns:
+
+- [Go desktop foundation 45486177740](https://github.com/Jakoczig/eridion/actions/runs/45486177740): success on `ubuntu-24.04` and `windows-latest`. This includes Go tests and vet, the race detector, native smoke, and every browser and visual gate. The G3D map gate passed on Windows (no flake).
+- [ERIDION legacy compatibility CI 45486177986](https://github.com/Jakoczig/eridion/actions/runs/45486177986): success on all 5 jobs.
+
+Unsigned preview artifacts from run 45486177740:
+
+- `eridion-g3e-Windows-x64-experimental-unsigned-preview` (id 14965786317)
+- `eridion-g3e-Linux-x64-experimental-unsigned-preview` (id 14965296193)
+
+They still carry the older G3E name because build identity is Task 10.
+
+The docs-only commit adding this section is verified in the PR description.
+
+## 8. Next batch
+
+Follow-ups from G3K:
+
+- event-driven navigation-context pushes (removes the 1 s sampling limit);
+- native WebView2/WebKitGTK and installed-map measurements on the owner's machine;
+- a durability-scoped import-throughput batch, if wanted (contract first).
+
+Remaining correction-plan tasks: Task 9, Task 10 (build identity), Tasks 20–22, and the Task 24 acceptance gate.
