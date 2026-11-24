@@ -1,17 +1,47 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
+// Ordered field reads (Task 18 / F22). One request is in flight at a time;
+// invalidations received meanwhile coalesce into a single follow-up. A reply
+// is applied only if it answers the newest request of the current context
+// (method, query/body, connection) and, for BioScan, names the requested body
+// and carries the rule revision already shown for this connection.
 export function useFieldRead (props, method, body = '') {
   const [value, setValue] = useState(null); const [notice, setNotice] = useState(''); const [revision, setRevision] = useState(0)
+  const shownVersion = useRef('')
   const refresh = () => setRevision(n => n + 1)
   useEffect(() => {
-    let active = true; let timer
-    setValue(null); setNotice('')
-    if (!props.connected || !props.ready) return () => { active = false }
-    const load = async () => { try { const v = await props.sendEvent(method, method === 'getGoBGSTally' ? JSON.parse(body) : body ? { body } : {}); if (active) setValue(v) } catch (e) { if (active) setNotice(e.message || 'Field projection unavailable') } }
+    const context = { active: true, seq: 0, inFlight: false, again: false }
+    let timer
+    setValue(null); setNotice(''); shownVersion.current = ''
+    if (!props.connected || !props.ready) return () => { context.active = false }
+    const message = method === 'getGoBGSTally' ? JSON.parse(body) : body ? { body } : {}
+    const accept = v => {
+      if (method !== 'getGoBioScan' || !v || typeof v !== 'object') return true
+      if (body && v.body !== undefined && v.body !== body) return false
+      // The rule revision is fixed for a connection (a reconnect resets the
+      // context): a reply with another revision answers a different context.
+      if (shownVersion.current && v.version && v.version !== shownVersion.current) return false
+      return true
+    }
+    const load = async () => {
+      if (!context.active) return
+      if (context.inFlight) { context.again = true; return }
+      context.inFlight = true; context.again = false
+      const seq = ++context.seq
+      try {
+        const v = await props.sendEvent(method, message)
+        if (context.active && seq === context.seq && accept(v)) { if (v?.version) shownVersion.current = v.version; setValue(v); setNotice('') }
+      } catch (e) {
+        if (context.active && seq === context.seq) setNotice(e.message || 'Field projection unavailable')
+      } finally {
+        context.inFlight = false
+        if (context.active && context.again) load()
+      }
+    }
     load()
     const liveTimer = method === 'getGoBioScan' ? setInterval(load, 1500) : null
     const stop = props.eventListener('journalSummaryChanged', () => { clearTimeout(timer); timer = setTimeout(load, 200) })
-    return () => { active = false; clearTimeout(timer); if (liveTimer) clearInterval(liveTimer); stop() }
+    return () => { context.active = false; clearTimeout(timer); if (liveTimer) clearInterval(liveTimer); stop() }
   }, [props.connected, props.ready, props.sendEvent, props.eventListener, method, body, revision])
   return { value, notice, refresh }
 }
@@ -32,7 +62,7 @@ export function ImportedItinerary (props) {
 export function BioScanPanel (props) {
   const { value, notice } = useFieldRead(props, 'getGoBioScan', props.body)
   const [filter, setFilter] = useState('possible by known criteria')
-  return <section className='go-field-ops' aria-label='Native BioScan'><h4>BioScan · native offline</h4><p>{value?.version || 'Loading criteria'} · {value?.signals ?? 'unknown'} observed signals</p><p>{value?.notice || 'Possible species are community suggestions, never confirmed observations.'}</p><label>Criteria results <select value={filter} onChange={e => setFilter(e.target.value)}>{['possible by known criteria', 'unknown criteria', 'excluded by a witnessed condition'].map(v => <option key={v}>{v}</option>)}</select></label>{value?.candidates?.filter(c => c.state === filter).slice(0, 32).map(c => <details key={c.symbol}><summary>{c.name} · {c.state}</summary><p>{c.minimumM ?? 'Unknown'} m reference diversity distance · base reference value {c.baseValue ?? 'unknown'} CR, no bonus assumed.</p>{c.evidence?.map(e => <p key={e}>{e}</p>)}<pre>{JSON.stringify(c.criteria, null, 2)}</pre></details>)}{!value?.candidates?.some(c => c.state === filter) && <p>No supported candidate in this category. Missing genus/environment is unknown, not absence of biology.</p>}{value?.liveSpacing && <p role='status'>LIVE SNAPSHOT SPACING · nearest known sample {value.liveSpacing.distanceM == null ? 'unknown' : Math.round(value.liveSpacing.distanceM) + ' m'} · remaining reference spacing {value.liveSpacing.remainingM == null ? 'unknown' : Math.ceil(value.liveSpacing.remainingM) + ' m'} · {value.liveSpacing.allLocationsKnown ? 'current-cycle locations recorded' : 'some sample locations unknown'}. {value.liveSpacing.notice}</p>}<h4>Witnessed Log / Sample / Analyse</h4>{value?.samples?.map((s, i) => <details key={s.at + i}><summary>{s.stage} · {s.species || s.genus || 'species unknown'} · {s.at}</summary><p>{s.notice}</p>{s.position && <p>Status snapshot {s.position.latitude}, {s.position.longitude} · {s.position.at}</p>}<p>Previous matching sample distance {s.distanceM == null ? 'unknown' : Math.round(s.distanceM) + ' m'} · remaining reference spacing {s.remainingM == null ? 'unknown' : Math.ceil(s.remainingM) + ' m'}. Derived from snapshots; not game-confirmed eligibility.</p></details>)}{notice && <p role='status'>{notice}</p>}</section>
+  return <section className='go-field-ops' aria-label='Native BioScan'><h4>BioScan · native offline</h4><p>{value?.version || 'Loading criteria'} · {value?.signals ?? 'unknown'} observed signals</p><p>{value?.notice || 'Possible species are community suggestions, never confirmed observations.'}</p><label>Criteria results <select value={filter} onChange={e => setFilter(e.target.value)}>{['possible by known criteria', 'unknown criteria', 'excluded by a witnessed condition'].map(v => <option key={v}>{v}</option>)}</select></label>{value?.candidates?.filter(c => c.state === filter).slice(0, 32).map(c => <details key={c.genus + c.symbol}><summary>{c.name} · {c.state}{c.variants?.length > 0 && ' · ' + c.variants.join(' / ')}</summary><p>{c.minimumM ?? 'Unknown'} m reference diversity distance · base reference value {c.baseValue ?? 'unknown'} CR, no bonus assumed.</p>{c.unknown?.length > 0 && <p>Still unknown: {c.unknown.join('; ')}</p>}{c.evidence?.map(e => <p key={e}>{e}</p>)}<pre>{JSON.stringify(c.criteria, null, 2)}</pre></details>)}{!value?.candidates?.some(c => c.state === filter) && <p>No supported candidate in this category. Missing genus/environment is unknown, not absence of biology.</p>}{value?.liveSpacing && <p role='status'>LIVE SNAPSHOT SPACING · nearest known sample {value.liveSpacing.distanceM == null ? 'unknown' : Math.round(value.liveSpacing.distanceM) + ' m'} · remaining reference spacing {value.liveSpacing.remainingM == null ? 'unknown' : Math.ceil(value.liveSpacing.remainingM) + ' m'} · {value.liveSpacing.allLocationsKnown ? 'current-cycle locations recorded' : 'some sample locations unknown'}. {value.liveSpacing.notice}</p>}<h4>Witnessed Log / Sample / Analyse</h4>{value?.samples?.map((s, i) => <details key={s.at + i}><summary>{s.stage} · {s.species || s.genus || 'species unknown'} · {s.at}</summary><p>{s.notice}</p>{s.position && <p>Status snapshot {s.position.latitude}, {s.position.longitude} · {s.position.at}</p>}<p>Previous matching sample distance {s.distanceM == null ? 'unknown' : Math.round(s.distanceM) + ' m'} · remaining reference spacing {s.remainingM == null ? 'unknown' : Math.ceil(s.remainingM) + ' m'}. Derived from snapshots; not game-confirmed eligibility.</p></details>)}{notice && <p role='status'>{notice}</p>}</section>
 }
 export function BuiltinModules (props) {
   const [modules, setModules] = useState([]); const [notice, setNotice] = useState('')
