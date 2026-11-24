@@ -74,3 +74,29 @@ func TestAuditResolvedVariantKeepsFinalEngineeredValues(t *testing.T) {
 		t.Fatalf("final engineered draw not used exactly once: %+v", v)
 	}
 }
+
+// G3I review F2: a verified Frontier ID the bundled catalogue does not know
+// (a future variant), or one that names another module for this symbol,
+// leaves the module unresolved: no stock statistics from the journal-only
+// guess, never a module ID contradicting Frontier.
+func TestAuditUnknownFrontierIDStaysUnresolved(t *testing.T) {
+	mods, _ := parseModules(map[string]any{"Modules": []any{
+		map[string]any{"Slot": "PowerDistributor", "Item": "int_powerdistributor_size4_class5"},
+		map[string]any{"Slot": "SmallHardpoint1", "Item": "hpt_pulselaser_fixed_small"},
+		map[string]any{"Slot": "SmallHardpoint2", "Item": "hpt_pulselaser_fixed_small"},
+	}})
+	if m := moduleBySlot(mods, "PowerDistributor"); m.Identity != "standard_unengineered" || m.Reference == nil {
+		t.Fatalf("journal-only baseline: %+v", m)
+	}
+	out := ReconcileModules(mods, []ModuleRef{
+		{Slot: "PowerDistributor", Item: "Int_PowerDistributor_Size4_Class5", ID: "129099998"},
+		{Slot: "SmallHardpoint1", Item: "Hpt_PulseLaser_Fixed_Small", ID: "129099999"},
+		{Slot: "SmallHardpoint2", Item: "Hpt_PulseLaser_Fixed_Small", ID: "128049383"}, // ID of another module
+	})
+	for _, slot := range []string{"PowerDistributor", "SmallHardpoint1", "SmallHardpoint2"} {
+		m := moduleBySlot(out, slot)
+		if m.Identity != "unknown" || m.Reference != nil || m.ModuleID == "128064197" {
+			t.Errorf("%s: %+v", slot, m)
+		}
+	}
+}

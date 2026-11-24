@@ -93,8 +93,14 @@ func ReconcileModules(mods []Module, refs []ModuleRef) []Module {
 				continue
 			}
 			r := catalog.ResolveModule(m.Item, ref.ID, m.Engineering != nil)
-			if r.Status == catalog.StatusExactID {
+			switch r.Status {
+			case catalog.StatusExactID:
 				applyResolution(&out[i], r, true)
+			case catalog.StatusUnknown:
+				// A verified ID the catalogue does not know, or one naming
+				// another module: the journal-only guess must not stand.
+				// The journal's name for the symbol is kept as the label.
+				applyResolution(&out[i], r, false)
 			}
 			break
 		}
