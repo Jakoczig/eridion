@@ -27,6 +27,16 @@ type bioEntry struct {
 
 const bioInferenceEntries = 64
 
+// inferBio is the inference function (replaced only by tests).
+var inferBio = fieldops.InferEnvironment
+
+// fssComplete reports whether absence of a star or body type among the
+// retained scans is evidence: the FSS reported every body found and the
+// retained scans cover that many bodies.
+func fssComplete(allFound bool, scannerBodies, scanned int) bool {
+	return allFound && scannerBodies > 0 && scanned >= scannerBodies
+}
+
 func bioKey(c bioContext, env fieldops.Environment, genera []string) string {
 	raw, _ := json.Marshal(struct {
 		Env    fieldops.Environment
@@ -58,8 +68,20 @@ func (s *Service) bioCandidates(c bioContext, env fieldops.Environment, genera [
 	}
 	b.computed++
 	b.mu.Unlock()
-	e.candidates = fieldops.InferEnvironment(env, genera)
-	close(e.done)
+	ok := false
+	defer func() {
+		// Waiters are always released; a failed computation is not cached.
+		if !ok {
+			b.mu.Lock()
+			if b.entries[key] == e {
+				delete(b.entries, key)
+			}
+			b.mu.Unlock()
+		}
+		close(e.done)
+	}()
+	e.candidates = inferBio(env, genera)
+	ok = true
 	return cloneCandidates(e.candidates)
 }
 

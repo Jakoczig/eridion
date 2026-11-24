@@ -92,9 +92,9 @@
   },
   {
    "key": "region",
-   "support": "ignored-upstream",
-   "evidence": "-",
-   "note": "upstream has no handler for the singular key"
+   "support": "unsupported",
+   "evidence": "galactic region",
+   "note": "upstream ignores the singular key (always passes); native keeps the restriction unknown"
   },
   {
    "key": "regions",
@@ -1304,10 +1304,10 @@
       "region",
       "volcanism"
      ],
-     "support": "full"
+     "support": "unsupported"
     }
    ],
-   "fullySupportedAlternative": true,
+   "fullySupportedAlternative": false,
    "variant": "none"
   },
   {
@@ -1327,10 +1327,10 @@
       "region",
       "volcanism"
      ],
-     "support": "full"
+     "support": "unsupported"
     }
    ],
-   "fullySupportedAlternative": true,
+   "fullySupportedAlternative": false,
    "variant": "none"
   },
   {
@@ -1346,10 +1346,10 @@
       "region",
       "volcanism"
      ],
-     "support": "full"
+     "support": "unsupported"
     }
    ],
-   "fullySupportedAlternative": true,
+   "fullySupportedAlternative": false,
    "variant": "none"
   },
   {
@@ -1369,10 +1369,10 @@
       "region",
       "volcanism"
      ],
-     "support": "full"
+     "support": "unsupported"
     }
    ],
-   "fullySupportedAlternative": true,
+   "fullySupportedAlternative": false,
    "variant": "none"
   },
   {
@@ -1391,10 +1391,10 @@
       "region",
       "volcanism"
      ],
-     "support": "full"
+     "support": "unsupported"
     }
    ],
-   "fullySupportedAlternative": true,
+   "fullySupportedAlternative": false,
    "variant": "none"
   },
   {
@@ -1411,10 +1411,10 @@
       "region",
       "volcanism"
      ],
-     "support": "full"
+     "support": "unsupported"
     }
    ],
-   "fullySupportedAlternative": true,
+   "fullySupportedAlternative": false,
    "variant": "none"
   },
   {
@@ -1434,10 +1434,10 @@
       "region",
       "volcanism"
      ],
-     "support": "full"
+     "support": "unsupported"
     }
    ],
-   "fullySupportedAlternative": true,
+   "fullySupportedAlternative": false,
    "variant": "none"
   },
   {
@@ -1456,10 +1456,10 @@
       "region",
       "volcanism"
      ],
-     "support": "full"
+     "support": "unsupported"
     }
    ],
-   "fullySupportedAlternative": true,
+   "fullySupportedAlternative": false,
    "variant": "none"
   },
   {
@@ -4421,5 +4421,5 @@
   }
  ],
  "total": 119,
- "withoutFullySupportedAlternative": 45
+ "withoutFullySupportedAlternative": 53
 }

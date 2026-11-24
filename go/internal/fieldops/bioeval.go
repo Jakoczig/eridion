@@ -351,11 +351,10 @@ func (e *evaluator) predicate(key string, want any) (outcome, string) {
 			return fail, ""
 		}
 		return pass, ""
-	case "region":
-		// Upstream has no handler for the singular key (Brain Tree), so
-		// it never restricts; mirrored, see the conformance document.
-		return pass, ""
-	case "regions":
+	case "region", "regions":
+		// Upstream ignores the singular key (Brain Tree), letting the
+		// species pass anywhere. A stated restriction that cannot be
+		// checked stays unknown here (intentional divergence, G3J review).
 		return unknown, "galactic region map not bundled"
 	case "guardian":
 		if b, ok := want.(bool); ok && !b {
@@ -488,18 +487,21 @@ func containsString(list any, v string) bool {
 
 // colours mirrors upstream's colour derivation: the first scanned parent
 // star (in parent order) whose type has a colour supplies it, then the
-// primary when it is not a parent. complete is false when an unscanned
-// parent precedes any match, or the primary is unknown or a black hole
-// (upstream then also considers stars orbiting the black hole, which is
-// not modelled).
-func (e *evaluator) colours(table map[string]any) (found []string, complete bool) {
+// primary when it is not a parent. complete reports whether an empty
+// result is evidence (false while a parent is unscanned, or the primary is
+// unknown or a black hole: upstream then also considers stars orbiting the
+// black hole, which is not modelled). provisional marks colours found
+// while an earlier parent star is still unscanned.
+func (e *evaluator) colours(table map[string]any) (found []string, complete, provisional bool) {
 	set := map[string]bool{}
 	complete = len(e.parentNames) > 0
 	matched := false
 	for _, name := range e.parentNames {
 		s, ok := e.stars[name]
 		if !ok {
+			// An earlier unscanned parent could supply a different colour.
 			complete = false
+			provisional = true
 			continue
 		}
 		if c, ok := colourFor(table, s.Type); ok {
@@ -523,7 +525,7 @@ func (e *evaluator) colours(table map[string]any) (found []string, complete bool
 		found = append(found, c)
 	}
 	sort.Strings(found)
-	return found, complete
+	return found, complete, provisional && len(found) > 0
 }
 
 func colourFor(table map[string]any, kind string) (string, bool) {

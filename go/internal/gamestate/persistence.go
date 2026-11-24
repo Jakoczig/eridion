@@ -75,6 +75,15 @@ func (s *Service) restoreCacheLocked(raw []byte) error {
 	if len(raw) > 32<<20 {
 		return errors.New("Cache budget exceeded")
 	}
+	// Read only the format first (gob skips the other fields), so a cache
+	// whose reducer types changed is still recognised as an older format.
+	var header struct{ Format string }
+	if err := gob.NewDecoder(bytes.NewReader(raw)).Decode(&header); err != nil {
+		return err
+	}
+	if header.Format != reducerFormat {
+		return errCacheFormat
+	}
 	if err := gob.NewDecoder(bytes.NewReader(raw)).Decode(&c); err != nil {
 		return err
 	}

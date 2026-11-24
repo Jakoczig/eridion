@@ -28,9 +28,12 @@ func (d *Dict) Get(key string) (any, bool) {
 }
 
 type parser struct {
-	src string
-	pos int
+	src   string
+	pos   int
+	depth int
 }
+
+const maxDepth = 64
 
 // Assignment parses the literal assigned to name at module level
 // (`name = <literal>` or `name: <annotation> = <literal>`; annotations in
@@ -45,10 +48,29 @@ func Assignment(src, name string) (any, error) {
 		if eq < 0 {
 			break
 		}
-		p := &parser{src: src, pos: line + eq + 1}
+		p := &parser{src: src, pos: line + eq + 1, depth: 0}
 		v, err := p.value()
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", name, err)
+		}
+		// Only a comment may follow the literal on its line: a trailing
+		// expression (`{...} | extra`) would silently change the data.
+		tail := src[p.pos:]
+		if nl := strings.IndexByte(tail, '\n'); nl >= 0 {
+			tail = tail[:nl]
+		}
+		if t := strings.TrimSpace(tail); t != "" && !strings.HasPrefix(t, "#") {
+			return nil, fmt.Errorf("%s: unexpected %q after the literal", name, t)
+		}
+		// A later module-level rebinding or mutation of the name is refused.
+		for _, later := range lineStarts(src) {
+			if later <= line || later >= len(src) {
+				continue
+			}
+			l := src[later:]
+			if strings.HasPrefix(l, name) && len(l) > len(name) && strings.ContainsRune(" :=.[|+", rune(l[len(name)])) {
+				return nil, fmt.Errorf("%s: rebound or modified later in the module", name)
+			}
 		}
 		return v, nil
 	}
@@ -89,6 +111,11 @@ func (p *parser) fail(msg string) error {
 }
 
 func (p *parser) value() (any, error) {
+	p.depth++
+	defer func() { p.depth-- }()
+	if p.depth > maxDepth {
+		return nil, p.fail("nesting too deep")
+	}
 	p.skip()
 	if p.pos >= len(p.src) {
 		return nil, p.fail("unexpected end")

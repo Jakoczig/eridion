@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/gob"
+	"errors"
 	"os"
 	"strings"
 	"sync"
@@ -85,7 +86,8 @@ func TestAuditBioCacheUpgradeRebuildsGenusIDs(t *testing.T) {
 	if err := gob.NewDecoder(bytes.NewReader(raw)).Decode(&c); err != nil {
 		t.Fatal(err)
 	}
-	// Simulate the older build: a different format and bodies without ids.
+	// Simulate the older build: a different reducer format. Startup must not
+	// restore any of it; every derived view is rebuilt from history.
 	c.Format = "older-build-format"
 	var b bytes.Buffer
 	if err := gob.NewEncoder(&b).Encode(c); err != nil {
@@ -116,6 +118,14 @@ func TestAuditBioCacheUpgradeRebuildsGenusIDs(t *testing.T) {
 			t.Fatalf("candidates not rebuilt from history: %+v", v)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+	// The genus identity itself is rebuilt from the retained SAASignalsFound
+	// evidence (not only reached through the sample-genus fallback).
+	s.mu.Lock()
+	survey := s.views.exploration.View("SYNTHETIC-A", "9007199254740993")
+	s.mu.Unlock()
+	if len(survey.Bodies) == 0 || len(survey.Bodies[0].GenusIDs) != 1 || survey.Bodies[0].GenusIDs[0] != "$Codex_Ent_Bacterial_Genus_Name;" || survey.Bodies[0].Genuses[0] != "Bakterium" {
+		t.Fatalf("genus ids not rebuilt from history: %+v", survey.Bodies)
 	}
 	after := bioCandidates(t, s)
 	if len(after) != len(before) {
@@ -210,5 +220,64 @@ func TestAuditBioModuleToggleKeepsIngestion(t *testing.T) {
 	}
 	if len(v["candidates"].([]fieldops.Candidate)) == 0 {
 		t.Fatal("candidates not restored after re-enable")
+	}
+}
+
+// G3J review F3: a cache from a build whose reducer types changed (not just
+// gained fields) still counts as an older format, not as corruption.
+func TestAuditCacheFormatCheckedBeforeFullDecode(t *testing.T) {
+	var b bytes.Buffer
+	type olderCache struct {
+		Format string
+		Ship   int // a different type than today's field
+	}
+	if err := gob.NewEncoder(&b).Encode(olderCache{Format: "older-build-format", Ship: 7}); err != nil {
+		t.Fatal(err)
+	}
+	s := &Service{}
+	if err := s.restoreCacheLocked(b.Bytes()); !errors.Is(err, errCacheFormat) {
+		t.Fatalf("older incompatible cache = %v, want errCacheFormat", err)
+	}
+	if err := s.restoreCacheLocked([]byte("not a gob stream")); err == nil || errors.Is(err, errCacheFormat) {
+		t.Fatalf("corrupt cache must not be treated as an older format: %v", err)
+	}
+}
+
+// G3J review F5/F9: a failed inference never strands later readers of the
+// same key; FSS completeness needs scans covering every reported body.
+func TestAuditBioInferenceFailureAndCompleteness(t *testing.T) {
+	s := &Service{}
+	calls := 0
+	inferBio = func(fieldops.Environment, []string) []fieldops.Candidate {
+		calls++
+		if calls == 1 {
+			panic("synthetic inference failure")
+		}
+		return []fieldops.Candidate{{Symbol: "OK"}}
+	}
+	defer func() { inferBio = fieldops.InferEnvironment }()
+	c := bioContext{fid: "SYNTHETIC-A", system: "1", body: "5"}
+	func() {
+		defer func() { _ = recover() }()
+		s.bioCandidates(c, fieldops.Environment{}, nil)
+	}()
+	done := make(chan []fieldops.Candidate, 1)
+	go func() { done <- s.bioCandidates(c, fieldops.Environment{}, nil) }()
+	select {
+	case got := <-done:
+		if len(got) != 1 || got[0].Symbol != "OK" {
+			t.Fatalf("retry after failure: %+v", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a reader waited forever on a failed inference")
+	}
+	for _, tc := range []struct {
+		all              bool
+		scanner, scanned int
+		want             bool
+	}{{true, 3, 3, true}, {true, 3, 2, false}, {false, 3, 3, false}, {true, 0, 0, false}} {
+		if got := fssComplete(tc.all, tc.scanner, tc.scanned); got != tc.want {
+			t.Errorf("fssComplete(%v,%d,%d) = %v", tc.all, tc.scanner, tc.scanned, got)
+		}
 	}
 }

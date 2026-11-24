@@ -50,7 +50,7 @@ var predicateSupport = map[string]PredicateSupport{
 	"tuber":                {Support: SupportNative, Evidence: "system StarPos", Note: "bundled tuber zone table"},
 	"nebula":               {Support: SupportPartial, Evidence: "system name", Note: "nebula sector names only; reference-star distances not bundled"},
 	"regions":              {Support: SupportUnsupported, Evidence: "galactic region", Note: "region map not bundled"},
-	"region":               {Support: SupportIgnoredUpstream, Evidence: "-", Note: "upstream has no handler for the singular key"},
+	"region":               {Support: SupportUnsupported, Evidence: "galactic region", Note: "upstream ignores the singular key (always passes); native keeps the restriction unknown"},
 }
 
 // RulesetSupport summarises one alternative.

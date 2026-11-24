@@ -84,6 +84,7 @@ type bioContext struct {
 	fid, system, body string
 	survey            explorestate.BodyView
 	allBodiesFound    bool
+	scannerBodies     int
 	live              bool
 	activeSource      string
 	status            []byte
@@ -98,6 +99,9 @@ func (s *Service) bioContextLocked(body string) (bioContext, bool) {
 	}
 	survey := s.views.exploration.View(fid, state.systemAddress)
 	c.allBodiesFound = survey.AllBodiesFound
+	if survey.ScannerBodyCount != nil {
+		c.scannerBodies = *survey.ScannerBodyCount
+	}
 	for _, b := range survey.Bodies {
 		if b.BodyID == body {
 			c.survey = b
@@ -145,7 +149,9 @@ func (s *Service) FieldBio(body string, owner bool) (map[string]any, error) {
 		scan, _ := v["environment"].(map[string]any)
 		env, _ := v["system"].(fieldops.Environment)
 		env.Body = scan
-		env.AllBodiesFound = c.allBodiesFound
+		// Absence of a star or body type is evidence only when the scans
+		// retained here cover every body the FSS reported (G3J review F9).
+		env.AllBodiesFound = fssComplete(c.allBodiesFound, c.scannerBodies, len(env.Stars)+len(env.Planets))
 		v["candidates"] = s.bioCandidates(c, env, genera)
 	}
 	delete(v, "scan")
@@ -193,7 +199,11 @@ func (s *Service) FieldBio(body string, owner bool) (map[string]any, error) {
 	now, still := s.bioContextLocked(body)
 	s.mu.Unlock()
 	if !still || now.fid != c.fid || now.system != c.system {
-		return map[string]any{"version": fieldops.BioRuleVersion(), "candidates": []fieldops.Candidate{}, "samples": []history.BioSample{}, "body": body, "notice": "Context changed while BioScan was computed; refreshed"}, nil
+		// Marked stale: clients keep what they show and read again.
+		return map[string]any{"version": fieldops.BioRuleVersion(), "candidates": []fieldops.Candidate{}, "samples": []history.BioSample{}, "body": body, "stale": true, "notice": "Context changed while BioScan was computed; refreshed"}, nil
+	}
+	if now.live != c.live || now.activeSource != c.activeSource {
+		delete(v, "liveSpacing") // the live source changed during the read
 	}
 	return v, nil
 }

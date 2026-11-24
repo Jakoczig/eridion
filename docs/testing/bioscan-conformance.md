@@ -34,11 +34,11 @@ Not vendored, so the dependent predicates remain unsupported:
 | | Sourced species | Without a fully supported alternative |
 | --- | --- | --- |
 | Before G3J (hand-converted rules, body-only evaluator) | 116 | 74 / 116 |
-| G3J | 119 (116 ruleset literals plus Bark Mound, Amphora Plant and Radicoida Unicus from `species.py`) | 45 / 119 (43 / 116 ruleset literals; 2 / 3 `species.py`) |
+| G3J | 119 (116 ruleset literals plus Bark Mound, Amphora Plant and Radicoida Unicus from `species.py`) | 53 / 119 (51 / 116 ruleset literals; 2 / 3 `species.py`) |
 
 A species has a *fully supported alternative* when at least one of its rulesets uses only natively supported predicates. Such a species can be decided once the journal evidence exists.
 
-All 45 remaining species need the galactic region map (`regions`), except two:
+All 53 remaining species need the galactic region map (`regions`, or the singular `region` used by the 8 Brain Trees), except two:
 
 - Electricae Radialem, whose alternatives need nebula proximity (decidable natively only by a nebula sector name);
 - Stratum Aranaemus, whose upstream ruleset list is empty.
@@ -78,15 +78,15 @@ Insufficient evidence never becomes a positive prediction. *Possible* is a commu
 | `body_type` | `Scan.PlanetClass` | membership |
 | `distance` | `Scan.DistanceFromArrivalLS` | fails below the value |
 | `system` | system name | equality |
-| `star` | star Scans of the system | any star matches a type, or a `(type, luminosity)` tuple with an optional `a`/`b`/`ab`/`z` suffix. A plain list entry never matches (upstream behaviour). Fails only after `FSSAllBodiesFound` |
+| `star` | star Scans of the system | any star matches a type, or a `(type, luminosity)` tuple with an optional `a`/`b`/`ab`/`z` suffix. A plain list entry never matches (upstream behaviour). Fails only after `FSSAllBodiesFound`, and only when the retained scans cover the reported body count |
 | `main_star` | primary star Scan (distance 0) | as `star`, for the primary (not used by the pinned rules) |
 | `parent_star` | primary and parent star Scans; parents derived from the body name as ExploData does | passes if the primary or a parent matches. Fails only when the primary and every parent are scanned |
-| `bodies` | body Scans of the system | any body of the listed classes. Fails only after `FSSAllBodiesFound` |
+| `bodies` | body Scans of the system | any body of the listed classes. Fails only after `FSSAllBodiesFound`, and only when the retained scans cover the reported body count |
 | `guardian` | system `StarPos` | within a bundled guardian-zone radius |
 | `tuber` | system `StarPos` | within a bundled tuber zone's min–max shell |
 | `nebula` | system name | **partial**: passes on a nebula sector name; otherwise unknown |
 | `regions` | galactic region | **unsupported**: always unknown |
-| `region` (singular, Brain Tree) | — | upstream has no handler for this key, so it never restricts; mirrored as a pass |
+| `region` (singular, Brain Tree) | galactic region | **unsupported**: always unknown. Upstream has no handler for this key, so upstream never restricts (see divergences) |
 
 `star_check` mirrors upstream:
 - A, B, F, G, K and M include their giant and supergiant types;
@@ -102,7 +102,7 @@ ExploData colour tables can exclude species:
   - Otherwise it is unknown, which includes a black-hole primary: upstream then also considers stars orbiting the black hole, which is not modelled.
 - **Element-dependent:** colours come from the body's `Materials`. Excluded when the materials are known and none qualifies; unknown when the materials were not scanned.
 
-The resulting colours are reported as `variants`.
+The resulting colours are reported as `variants`. A colour found while an earlier parent star is still unscanned is marked provisional in the candidate's evidence, because upstream would prefer that earlier parent once it is scanned.
 
 ## Intentional divergences
 
@@ -114,8 +114,10 @@ The resulting colours are reported as `variants`.
 | `regions` | evaluated with the region map | **unknown** | Region map not bundled (provenance) |
 | Species with an empty ruleset (Stratum Aranaemus) | never listed | listed as **unknown**, "no sourced criteria" | Not claimed impossible |
 | `"No volcanism"` | compared verbatim | treated as none | Older journal spelling of the same fact |
+| Singular `region` key (8 Brain Trees) | ignored, so the species passes anywhere | **unknown** | A stated restriction that cannot be checked must not become a positive prediction (G3J review) |
+| `FSSAllBodiesFound` with fewer retained scans than the reported body count (gap, quarantined file, more than 512 bodies) | treated as complete | **unknown** | Absence is evidence only when the scans are actually complete |
 
-Quirks reproduced deliberately: the singular `region` key is not enforced, and a plain list inside a `star` list never matches.
+Quirk reproduced deliberately: a plain list inside a `star` list never matches.
 
 ## Boundary fixtures
 

@@ -137,3 +137,19 @@ test('BioScan: a reply after unmount or from another rule revision is not applie
   t.mock.timers.tick(5000); await h.settle()
   assert.equal(h.requests.length, count, 'no polling after unmount')
 })
+
+test('BioScan: a stale reply keeps the shown view and triggers one fresh read', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] })
+  const h = harness()
+  try {
+    await h.flush()
+    h.requests[0].resolve(reply('5', 'SHOWN')); await h.settle()
+    h.emit('journalSummaryChanged'); t.mock.timers.tick(250); await h.settle()
+    const count = h.requests.length
+    h.requests.at(-1).resolve({ version: 'bioscan-native-2', body: '5', candidates: [], samples: [], stale: true }); await h.settle()
+    assert.match(h.html(), /SHOWN/, 'a stale reply emptied the view')
+    assert.equal(h.requests.length, count + 1, 'a stale reply is followed by one fresh read')
+    h.requests.at(-1).resolve(reply('5', 'FRESH')); await h.settle()
+    assert.match(h.html(), /FRESH/)
+  } finally { h.unmount() }
+})

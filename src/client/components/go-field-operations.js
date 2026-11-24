@@ -30,7 +30,8 @@ export function useFieldRead (props, method, body = '') {
       const seq = ++context.seq
       try {
         const v = await props.sendEvent(method, message)
-        if (context.active && seq === context.seq && accept(v)) { if (v?.version) shownVersion.current = v.version; setValue(v); setNotice('') }
+        if (context.active && seq === context.seq && v?.stale) context.again = true // context moved during the read: keep the view, read again
+        else if (context.active && seq === context.seq && accept(v)) { if (v?.version) shownVersion.current = v.version; setValue(v); setNotice('') }
       } catch (e) {
         if (context.active && seq === context.seq) setNotice(e.message || 'Field projection unavailable')
       } finally {

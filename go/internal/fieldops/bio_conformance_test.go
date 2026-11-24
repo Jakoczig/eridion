@@ -199,8 +199,8 @@ func TestBioStellarAndSystemPredicates(t *testing.T) {
 	if o, _ := ev.predicate("regions", []any{"orion-cygnus"}); o != unknown {
 		t.Error("regions are not bundled: unknown")
 	}
-	if o, _ := ev.predicate("region", []any{"brain-tree"}); o != pass {
-		t.Error("singular 'region' is not evaluated upstream")
+	if o, _ := ev.predicate("region", []any{"brain-tree"}); o != unknown {
+		t.Error("singular 'region' (ignored upstream) is a restriction that stays unknown")
 	}
 	if o, _ := ev.predicate("max_orbital_period", 86400); o != unknown {
 		t.Error("orbital period not scanned")
@@ -296,5 +296,21 @@ func TestBioAlternativesAndUnsourced(t *testing.T) {
 	env.Stars[0].BodyName = "HIP 87621"
 	if c := inference(t, env, "$Codex_Ent_Ingensradices_Genus_Name;", "Radicoida Unicus"); c.Inference != Possible {
 		t.Fatalf("Radicoida Unicus in its system: %+v", c)
+	}
+}
+
+// G3J review F6: body "AB 1" with A unscanned and B scanned: B's colour is
+// reported but marked provisional (upstream would prefer A once scanned).
+func TestBioProvisionalColour(t *testing.T) {
+	arcus := map[string]any{"BodyName": "Fixture Sys AB 1", "AtmosphereType": "CarbonDioxide", "PlanetClass": "Rocky body", "SurfaceGravity": 1.0, "SurfaceTemperature": 177.0, "SurfacePressure": 2000.0, "Volcanism": ""}
+	env := Environment{Body: arcus, SystemName: "Fixture Sys", Stars: []StarEvidence{{BodyName: "Fixture Sys B", Type: "K", Luminosity: "V"}}}
+	c := inference(t, env, "$Codex_Ent_Aleoids_Genus_Name;", "Aleoida Arcus")
+	if c.Inference != Possible || len(c.Variants) != 1 || c.Variants[0] != "Turquoise" || !strings.Contains(strings.Join(c.Evidence, ","), "provisional") {
+		t.Fatalf("provisional colour not marked: %+v", c)
+	}
+	env.Stars = append(env.Stars, StarEvidence{BodyName: "Fixture Sys A", Type: "F", Luminosity: "V", DistanceLS: zero()})
+	c = inference(t, env, "$Codex_Ent_Aleoids_Genus_Name;", "Aleoida Arcus")
+	if len(c.Variants) != 1 || c.Variants[0] != "Teal" || strings.Contains(strings.Join(c.Evidence, ","), "provisional") {
+		t.Fatalf("parent A decides the colour once scanned: %+v", c)
 	}
 }

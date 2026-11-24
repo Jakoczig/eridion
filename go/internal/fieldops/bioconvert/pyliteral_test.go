@@ -33,6 +33,10 @@ func TestLiteralParserRejectsCode(t *testing.T) {
 		"data = {'a': other_dict}",
 		"data = {'a': 1, 'a': 2}",
 		"data = {'a': 1",
+		"data = {'a': 1} | extra\n",
+		"data = {'a': 1}\ndata.update({'b': 2})\n",
+		"data = {'a': 1}\ndata = {}\n",
+		"data = " + strings.Repeat("[", 100) + strings.Repeat("]", 100),
 	} {
 		if _, err := Assignment(src, "data"); err == nil {
 			t.Errorf("accepted %q", src)

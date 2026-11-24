@@ -104,6 +104,7 @@ func InferEnvironment(env Environment, genera []string) []Candidate {
 	}
 	genusVariants := map[string][]string{}
 	genusOutcome := map[string]outcome{}
+	genusProvisional := map[string]bool{}
 	for _, s := range pack.Species {
 		if len(wanted) > 0 && !wanted[s.Genus] {
 			continue
@@ -147,8 +148,11 @@ func InferEnvironment(env Environment, genera []string) []Candidate {
 			if spec, ok := g.Colors["species"].(map[string]any); ok {
 				entry, _ := spec[s.Symbol].(map[string]any)
 				if table, ok := entry["star"].(map[string]any); ok {
-					found, complete := e.colours(table)
+					found, complete, provisional := e.colours(table)
 					c.Variants = found
+					if provisional {
+						c.Evidence = append(c.Evidence, "Colour variant provisional: an earlier parent star is not scanned")
+					}
 					if len(found) == 0 {
 						if complete {
 							result = fail
@@ -171,8 +175,9 @@ func InferEnvironment(env Environment, genera []string) []Candidate {
 				}
 			} else if table, ok := g.Colors["star"].(map[string]any); ok {
 				if _, done := genusOutcome[s.Genus]; !done {
-					found, complete := e.colours(table)
+					found, complete, provisional := e.colours(table)
 					genusVariants[s.Genus] = found
+					genusProvisional[s.Genus] = provisional
 					switch {
 					case len(found) > 0:
 						genusOutcome[s.Genus] = pass
@@ -183,6 +188,9 @@ func InferEnvironment(env Environment, genera []string) []Candidate {
 					}
 				}
 				c.Variants = genusVariants[s.Genus]
+				if genusProvisional[s.Genus] {
+					c.Evidence = append(c.Evidence, "Colour variant provisional: an earlier parent star is not scanned")
+				}
 				switch genusOutcome[s.Genus] {
 				case fail:
 					result = fail
