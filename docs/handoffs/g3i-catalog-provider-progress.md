@@ -114,7 +114,27 @@ Local, on `964c73a` and again on the post-review head `dae6d75` (Linux): `lint:s
 
 ## 7. CI and draft PR
 
-Pending.
+Draft PR: [#31](https://github.com/Jakoczig/eridion/pull/31), `go/g3i-catalog-provider-modernization` → `go/g3h-provider-export-corrections`. Both workflows trigger for it (branch-filter change `964c73a`).
+
+First attempt on `d683da4`:
+
+- Legacy CI passed.
+- Go desktop failed on Windows only, in `TestUpstreamLockConformance`. The Windows checkout (autocrlf) had converted the pinned LF files (material and microresources CSVs, the EDDN schemas, `modules.json`) to CRLF, so their bytes no longer matched the lock. The CRLF-native CSVs were unaffected. The upload-step failures in that run were consequential (no evidence produced after the test failure).
+- Fixed in `6bafc75`: `.gitattributes` marks every pinned bundled copy `-text`, and the conformance test now requires it (verified red without the file). The independent review had judged line endings not to be a Windows risk; CI showed otherwise.
+
+Source commit `6bafc75793fc8648d0f19771c3a923d766f97627` (all code; this ledger before this section):
+
+- [Go desktop foundation 45335620408](https://github.com/Jakoczig/eridion/actions/runs/45335620408): success on `ubuntu-24.04` and `windows-latest`.
+- [ERIDION legacy compatibility CI 45335620382](https://github.com/Jakoczig/eridion/actions/runs/45335620382): success.
+
+Unsigned preview artifacts from run 45335620408:
+
+- `eridion-g3e-Windows-x64-experimental-unsigned-preview` (id 14893104900)
+- `eridion-g3e-Linux-x64-experimental-unsigned-preview` (id 14894915294)
+
+They still carry the older G3E name because build identity is Task 10.
+
+The docs-only commit adding this section is verified in the PR description.
 
 ## 8. Next batch
 
