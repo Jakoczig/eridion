@@ -173,7 +173,7 @@ func TestExplorationSupercruiseDoesNotPretendSystemChange(t *testing.T) {
 
 func TestExplorationPublicPayloadHasByteBudget(t *testing.T) {
 	m := start(t)
-	g := `{"Genus_Localised":"` + strings.Repeat("🚀", 128) + `"}`
+	g := `{"Genus":"$Codex_Ent_Bacterial_Genus_Name;","Genus_Localised":"` + strings.Repeat("🚀", 128) + `"}`
 	for i := 0; i < 512; i++ {
 		apply(t, m, "A", fmt.Sprintf(`{"event":"Scan","SystemAddress":9007199254740993,"BodyID":%d,"BodyName":"Fixture Body %d"}`, i, i))
 		apply(t, m, "A", fmt.Sprintf(`{"event":"SAASignalsFound","SystemAddress":9007199254740993,"BodyID":%d,"Genuses":[%s]}`, i, g))

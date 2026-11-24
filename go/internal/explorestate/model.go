@@ -38,7 +38,10 @@ type BodyView struct {
 	PreviouslyDiscovered *bool          `json:"previouslyDiscovered"`
 	PreviouslyMapped     *bool          `json:"previouslyMapped"`
 	DSSMapped            bool           `json:"dssMapped"`
-	Genuses              []string       `json:"genuses"`
+	// Genuses are localized display labels paired by index with GenusIDs,
+	// the stable journal genus symbols used for identity and inference.
+	Genuses  []string `json:"genuses"`
+	GenusIDs []string `json:"genusIds"`
 }
 type ExplorationView struct {
 	SystemName        string     `json:"systemName"`
@@ -288,7 +291,7 @@ func (m *Model) applyEvent(key string, s *contextState, e journal.Event) {
 			target.overflow = true
 			return
 		}
-		body = &bodyState{view: BodyView{BodyID: id, Genuses: []string{}}}
+		body = &bodyState{view: BodyView{BodyID: id, Genuses: []string{}, GenusIDs: []string{}}}
 		target.bodies[id] = body
 	}
 	b := &body.view
@@ -380,23 +383,26 @@ func (m *Model) applyEvent(key string, s *contextState, e journal.Event) {
 			}
 		}
 		if data.Genuses != nil {
-			genuses := []string{}
+			// Identity is the genus symbol (Task 6); the localized label is
+			// presentation only and falls back to the symbol when missing.
+			genuses, ids := []string{}, []string{}
 			seen := map[string]bool{}
 			for _, g := range data.Genuses {
-				name := g.Genus_Localised
-				if name == "" {
-					name = g.Genus
-				}
-				if !text(name) {
+				if !text(g.Genus) || !strings.HasPrefix(g.Genus, "$") {
 					target.partial = true
 					continue
 				}
-				if !seen[name] {
+				name := g.Genus_Localised
+				if !text(name) {
+					name = g.Genus
+				}
+				if !seen[g.Genus] {
+					ids = append(ids, g.Genus)
 					genuses = append(genuses, name)
-					seen[name] = true
+					seen[g.Genus] = true
 				}
 			}
-			b.Genuses = genuses
+			b.Genuses, b.GenusIDs = genuses, ids
 		}
 	}
 }

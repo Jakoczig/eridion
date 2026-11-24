@@ -7,7 +7,7 @@ export function mergeCommunity (local, community) {
     const witnessed = byId.get(external.bodyId)
     // Exact body identity only; names or provider database IDs are not join keys.
     if (witnessed) { witnessed.communityReference = external; continue }
-    const body = { ...external, source: 'community', dssMapped: false, bioSignals: null, geoSignals: null, previouslyMapped: null, previouslyDiscovered: null, genuses: [], organisms: [] }
+    const body = { ...external, source: 'community', dssMapped: false, bioSignals: null, geoSignals: null, previouslyMapped: null, previouslyDiscovered: null, genuses: [], genusIds: [], organisms: [] }
     bodies.push(body); byId.set(body.bodyId, body)
   }
   return bodies.slice(0, 512)

@@ -77,7 +77,7 @@ func assertG2BSafe(t *testing.T, name string, raw json.RawMessage) {
 		var bodies []json.RawMessage
 		json.Unmarshal(v["bodies"], &bodies)
 		for _, b := range bodies {
-			fields := onlyKeys(t, b, "name kind bodyId atmosphere volcanism landable terraformable gravityG distanceLS bioSignals geoSignals previouslyDiscovered previouslyMapped dssMapped genuses")
+			fields := onlyKeys(t, b, "name kind bodyId atmosphere volcanism landable terraformable gravityG distanceLS bioSignals geoSignals previouslyDiscovered previouslyMapped dssMapped genuses genusIds")
 			var id string
 			if json.Unmarshal(fields["bodyId"], &id) != nil || id == "" {
 				t.Fatal("BodyID not an exact string")

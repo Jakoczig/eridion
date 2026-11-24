@@ -58,7 +58,7 @@ func Infer(scan map[string]any, genera []string) []Candidate {
 		if len(genera) > 0 {
 			found := false
 			for _, g := range genera {
-				if g == s.Genus || strings.EqualFold(g, pack.GenusNames[s.Genus]) {
+				if g == s.Genus {
 					found = true
 				}
 			}

@@ -273,7 +273,14 @@ func (s *Service) Run(ctx context.Context) error {
 			if e == nil && len(raw) > 0 {
 				s.mu.Lock()
 				e = s.restoreCacheLocked(raw)
-				if e == nil {
+				if errors.Is(e, errCacheFormat) {
+					// Older build: rebuild every derived view from the
+					// retained journal history (original files not needed).
+					e = nil
+					s.needsStartupRebuild = true
+					s.summary.ImportInProgress = true
+					s.summary.SourceState = "replaying"
+				} else if e == nil {
 					s.restored = true
 					// No default adoption here: the cache has not yet seen the
 					// journals written while ERIDION was closed. Adoption and

@@ -21,7 +21,10 @@ import (
 // The catalogue digest changes whenever bundled catalogue data or review
 // decisions change, so cached projections are rebuilt with the new module
 // identities (Task 16; G3I review F6).
-var reducerFormat = shipstate.CacheFormat + paritystate.CacheFormat + activitystate.CacheFormat + navstate.CacheFormat + navcontext.CacheFormat + explorestate.CacheFormat + "catalog-" + catalog.DataDigest()
+// bioIdentityFormat: exploration bodies carry stable genus IDs (Task 6).
+const bioIdentityFormat = "bio-genus-ids-g3j-1"
+
+var reducerFormat = shipstate.CacheFormat + paritystate.CacheFormat + activitystate.CacheFormat + navstate.CacheFormat + navcontext.CacheFormat + explorestate.CacheFormat + "catalog-" + catalog.DataDigest() + bioIdentityFormat
 
 type cacheCommander struct{ System, SystemAddress, MarketID string }
 type reducerCache struct {
@@ -61,6 +64,12 @@ func (s *Service) cacheLocked() ([]byte, error) {
 	err := gob.NewEncoder(&b).Encode(c)
 	return b.Bytes(), err
 }
+
+// errCacheFormat marks a cache written by a build with another reducer
+// format. It is derived data: startup rebuilds it from retained history
+// instead of entering database recovery (G3J).
+var errCacheFormat = errors.New("Derived cache format changed; rebuilding from history")
+
 func (s *Service) restoreCacheLocked(raw []byte) error {
 	var c reducerCache
 	if len(raw) > 32<<20 {
@@ -69,7 +78,10 @@ func (s *Service) restoreCacheLocked(raw []byte) error {
 	if err := gob.NewDecoder(bytes.NewReader(raw)).Decode(&c); err != nil {
 		return err
 	}
-	if c.Format != reducerFormat || c.Ship == nil || c.Parity == nil || c.Activity == nil || c.Navigation == nil || c.Exploration == nil || c.Context == nil || len(c.Commanders) > 64 {
+	if c.Format != reducerFormat {
+		return errCacheFormat
+	}
+	if c.Ship == nil || c.Parity == nil || c.Activity == nil || c.Navigation == nil || c.Exploration == nil || c.Context == nil || len(c.Commanders) > 64 {
 		return errors.New("Derived cache needs an explicit rebuild")
 	}
 	if c.StartupVersion > 1 {

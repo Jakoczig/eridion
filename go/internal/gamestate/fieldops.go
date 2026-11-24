@@ -102,7 +102,9 @@ func (s *Service) FieldBio(body string, owner bool) (map[string]any, error) {
 		if err != nil {
 			return out, err
 		}
-		genera := b.Genuses
+		// Stable genus symbols only (Task 6); localized labels never
+		// identify a genus.
+		genera := b.GenusIDs
 		if len(genera) == 0 {
 			genera, _ = v["genera"].([]string)
 		}
