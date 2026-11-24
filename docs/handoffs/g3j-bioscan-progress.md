@@ -132,11 +132,25 @@ All results above come from synthetic journals, deterministic fixtures and contr
 | `ea52b07` | Native BioScan evaluator and generated rules; Task 18 backend |
 | `e203266` | Task 18: ordered BioScan reads in the UI |
 | `8cb7339` | Docs, credits, module version, CI filters |
-| (review fixes) | Review findings F1–F10 |
+| `79b0a7f` | Review findings F1–F10 and this ledger |
 
 ## 8. CI and draft PR
 
-Pending.
+Draft PR: [#32](https://github.com/Jakoczig/eridion/pull/32), `go/g3j-bioscan-correctness` → `go/g3i-catalog-provider-modernization`. Both workflows trigger for it (branch-filter change in `8cb7339`).
+
+Source commit `79b0a7f2e1f31f863a7009d6c4ee4d0ecb839c78` (all code; this ledger before this section), attempt 1, no reruns:
+
+- [Go desktop foundation 45371121270](https://github.com/Jakoczig/eridion/actions/runs/45371121270): success on `ubuntu-24.04` and `windows-latest`. This includes Go tests and vet, the race detector, native smoke, and every browser and visual gate. The new `-text` attributes kept the vendored BioScan files and generated rules byte-exact on Windows.
+- [ERIDION legacy compatibility CI 45371121165](https://github.com/Jakoczig/eridion/actions/runs/45371121165): success (lint; regression tests on Ubuntu and Windows; client and app builds).
+
+Unsigned preview artifacts from run 45371121270:
+
+- `eridion-g3e-Windows-x64-experimental-unsigned-preview` (id 14910861504)
+- `eridion-g3e-Linux-x64-experimental-unsigned-preview` (id 14910162307)
+
+They still carry the older G3E name because build identity is Task 10.
+
+The docs-only commit adding this section is verified in the PR description.
 
 ## 9. Next batch
 
