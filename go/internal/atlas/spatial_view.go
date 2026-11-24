@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/Jakoczig/eridion/go/internal/perfstats"
 	"math"
 	"os"
 	"path/filepath"
@@ -212,6 +213,7 @@ func (m *SpatialManager) query(q SpatialQuery) (SpatialView, []spatialNeed, map[
 	return v, nil, pins
 }
 func (m *SpatialManager) View(q SpatialQuery, owner bool) (SpatialView, error) {
+	perfstats.Add("spatial.view", 1)
 	if !validSpatialQuery(q) {
 		return SpatialView{}, errors.New("Invalid spatial volume or prefetch context")
 	}

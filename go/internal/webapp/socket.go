@@ -129,6 +129,7 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 		if err != nil {
 			return err
 		}
+		recordFrame(value, len(data))
 		return conn.Write(ctx, websocket.MessageText, data)
 	}
 	if send(map[string]any{"name": "loadingProgress", "message": s.loadingStatus()}) != nil {

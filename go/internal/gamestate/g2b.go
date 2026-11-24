@@ -8,6 +8,7 @@ import (
 	"github.com/Jakoczig/eridion/go/internal/navcontext"
 	"github.com/Jakoczig/eridion/go/internal/navstate"
 	"github.com/Jakoczig/eridion/go/internal/paritystate"
+	"github.com/Jakoczig/eridion/go/internal/perfstats"
 	"github.com/Jakoczig/eridion/go/internal/shipstate"
 	"github.com/Jakoczig/eridion/go/internal/sidecar"
 	"reflect"
@@ -48,6 +49,7 @@ func newProjectionState() projectionState {
 	return projectionState{parity: paritystate.NewModel(), activity: activitystate.NewModel(), ship: shipstate.NewModel(), navigation: navstate.NewModel(), exploration: explorestate.NewModel(), subscribers: map[chan Projections]struct{}{}, dirty: true}
 }
 func (s *Service) projectionLocked() Projections {
+	perfstats.Add("projection.build", 1)
 	fid := s.displayFIDLocked()
 	if s.cachedProjection != nil && s.summary.ImportInProgress && fid != "" && fid == s.cachedProjectionFID {
 		p := cloneProjection(*s.cachedProjection)
@@ -199,6 +201,7 @@ func (s *Service) publishProjectionsLocked() {
 	}
 	s.views.last = p
 	s.views.hasLast = true
+	perfstats.Add("projection.publish", 1)
 	for ch := range s.views.subscribers {
 		select {
 		case ch <- cloneProjection(p):

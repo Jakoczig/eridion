@@ -10,6 +10,8 @@ import (
 	"sort"
 	"testing"
 	"time"
+
+	"github.com/Jakoczig/eridion/go/internal/perfstats"
 )
 
 // TestPerfNativeServiceBaseline measures the real embedded service (journal
@@ -70,6 +72,7 @@ func TestPerfNativeServiceBaseline(t *testing.T) {
 	}
 
 	// Cold import of the whole fixture into an empty profile.
+	perfstats.Reset()
 	cpu0, _, _ := processSample()
 	t0 := time.Now()
 	s := start()
@@ -77,6 +80,8 @@ func TestPerfNativeServiceBaseline(t *testing.T) {
 	cold := time.Since(t0)
 	cpu1, ws1, peak1 := processSample()
 	result["coldImportSeconds"], result["coldImportCPUSeconds"], result["coldWorkingSetMB"], result["coldPeakWorkingSetMB"] = cold.Seconds(), cpu1-cpu0, ws1>>20, peak1>>20
+	result["coldPerfstats"] = perfstats.Take()
+	perfstats.Reset()
 	stop(s)
 	size := int64(0)
 	_ = filepath.Walk(profile, func(_ string, info os.FileInfo, err error) error {
@@ -145,6 +150,7 @@ func TestPerfNativeServiceBaseline(t *testing.T) {
 	result["liveAppendP50ms"], result["liveAppendP95ms"], result["liveAppendMaxms"] = latencies[len(latencies)/2], latencies[len(latencies)*95/100], latencies[len(latencies)-1]
 	_, _, peak := processSample()
 	result["runPeakWorkingSetMB"] = peak >> 20
+	result["perfstats"] = perfstats.Take() // whole run: builds, checkpoints, lock timings
 	stop(s)
 	raw, _ := json.Marshal(result)
 	fmt.Println("PERF_RESULT " + string(raw))

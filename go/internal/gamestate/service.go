@@ -3,6 +3,7 @@ package gamestate
 import (
 	"context"
 	"errors"
+	"github.com/Jakoczig/eridion/go/internal/perfstats"
 	"os"
 	"strings"
 	"sync"
@@ -94,7 +95,7 @@ type Service struct {
 	cachedProjection    *Projections
 	cachedProjectionFID string
 	navigationContext   *navcontext.Model
-	mu                  sync.Mutex
+	mu                  perfstats.Mutex
 	views               projectionState
 	opts                Options
 	summary             Summary
@@ -120,7 +121,9 @@ func NewService(opts Options) (*Service, error) {
 		initialStage = "RESTORING_CACHE"
 	}
 	accounts, accountsError := loadAccountsForService(opts.StorageDir)
-	return &Service{accounts: accounts, accountsError: accountsError, maintenance: make(chan maintenanceRequest), navigationContext: navcontext.New(), views: newProjectionState(), opts: opts, summary: Summary{Stage: initialStage, SourceState: "waiting", ImportInProgress: true}, details: SourceDetails{Override: opts.Directory, Sidecars: map[string]string{}}, commanders: map[string]commanderState{}, subscribers: map[chan Summary]struct{}{}, selectSource: make(chan selection), done: make(chan struct{})}, nil
+	svc := &Service{accounts: accounts, accountsError: accountsError, maintenance: make(chan maintenanceRequest), navigationContext: navcontext.New(), views: newProjectionState(), opts: opts, summary: Summary{Stage: initialStage, SourceState: "waiting", ImportInProgress: true}, details: SourceDetails{Override: opts.Directory, Sidecars: map[string]string{}}, commanders: map[string]commanderState{}, subscribers: map[chan Summary]struct{}{}, selectSource: make(chan selection), done: make(chan struct{})}
+	svc.mu.Named("game.mu")
+	return svc, nil
 }
 
 // beforeStartupRebuild is a test hook run between restoring a legacy cache

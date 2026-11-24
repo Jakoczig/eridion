@@ -4,11 +4,13 @@ import (
 	"context"
 	"github.com/Jakoczig/eridion/go/internal/community"
 	"github.com/Jakoczig/eridion/go/internal/navcontext"
+	"github.com/Jakoczig/eridion/go/internal/perfstats"
 	"strings"
 )
 
 func strictDecode(raw []byte, v any) error { return navcontext.Decode(raw, v) }
 func (s *Server) contextView(p socketPrincipal) any {
+	perfstats.Add("context.build", 1)
 	return map[string]any{"navigation": s.game.NavigationContext(), "policy": s.displayPolicy(p)}
 }
 func (s *Server) systemView(ctx context.Context, name string, lookup bool) any {
