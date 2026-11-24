@@ -1,3 +1,4 @@
+import { visibleInterval } from '../lib/visible-interval'
 import { useEffect, useState } from 'react'
 import { eliteDateTime } from '../lib/format'
 export const show = (value, unit = '', digits = 1) => value == null ? '—' : `${Number(value).toLocaleString(undefined, { maximumFractionDigits: digits })}${unit ? ` ${unit}` : ''}`
@@ -6,7 +7,7 @@ export function Metric ({ label, value, unit, icon, tone = '' }) { return <div c
 export function Badge ({ children, tone = '' }) { return <span className={`go-badge ${tone}`}>{children}</span> }
 export function Clock () {
   const [time, setTime] = useState(eliteDateTime())
-  useEffect(() => { if (typeof window === 'undefined') return; const id = setInterval(() => setTime(eliteDateTime()), 1000); return () => clearInterval(id) }, [])
+  useEffect(() => { if (typeof window === 'undefined') return; return visibleInterval(() => setTime(eliteDateTime()), 1000) }, [])
   return <span className='go-clock'><strong>{time.time}</strong><small>{time.day} {time.month} {time.year}</small></span>
 }
 export function SampleProgress ({ organism }) {

@@ -20,6 +20,9 @@ import (
 type Server struct {
 	atlas                     *atlas.Manager
 	spatial                   *atlas.SpatialManager
+	demand                    demandRegistry
+	payloads                  encodedPayloads
+	navContext                navContextMemo
 	accountMu                 sync.Mutex
 	accountConfirmed          atomic.Bool
 	copyWaypoint              func(string) error
@@ -122,6 +125,8 @@ func StartLocalWithOptions(ctx context.Context, assets fs.FS, opts Options) (*Se
 		if server.g2e {
 			server.initCompanion(opts)
 		}
+		// Normal mode with no display: prepare no view-only projections.
+		server.recomputeDemand()
 		manager.mu.Lock()
 		if manager.state.Enabled {
 			if err := manager.enableLocked(manager.state.Address, manager.state.Port); err != nil {

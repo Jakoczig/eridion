@@ -1,18 +1,15 @@
 import { useEffect, useState } from 'react'
+import { viewStore, EMPTY } from '../lib/go-view-store'
 
+// useGoProjection reads one gameplay projection through the shared view
+// store (G3K PERF-02): equivalent consumers share the initial request and
+// the immutable snapshot, and a newer live broadcast is never replaced by a
+// delayed initial reply (see lib/go-view-store.js).
 export default function useGoProjection ({ connected, ready, sendEvent, eventListener }, rpc, changed, delta = null) {
-  const [value, setValue] = useState(null)
-  const [error, setError] = useState('')
+  const [snapshot, setSnapshot] = useState(EMPTY)
   useEffect(() => {
-    if (!connected || !ready) { setValue(null); setError(''); return }
-    let active = true
-    let liveSeen = false
-    let latestDelta = null
-    setValue(null); setError('')
-    const stop = eventListener(changed, next => { if (active) { liveSeen = true; latestDelta = null; setValue(next); setError('') } })
-    const stopDelta = delta ? eventListener(delta.name, next => { if (active) { latestDelta = next; setValue(previous => previous ? delta.merge(previous, next) : previous) } }) : () => {}
-    sendEvent(rpc).then(next => { if (active && !liveSeen) { setValue(latestDelta && delta ? delta.merge(next, latestDelta) : next); setError('') } }).catch(() => { if (active && !liveSeen) setError('Local journal view unavailable. Reconnect or check journal status.') })
-    return () => { active = false; stop(); stopDelta() }
+    if (!connected || !ready) { setSnapshot(EMPTY); return }
+    return viewStore({ sendEvent, eventListener }).subscribe({ rpc, changed, delta }, setSnapshot)
   }, [connected, ready, sendEvent, eventListener, rpc, changed, delta])
-  return { value, error }
+  return { value: snapshot.value, error: snapshot.error }
 }

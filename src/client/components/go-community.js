@@ -1,3 +1,4 @@
+import { visibleInterval } from '../lib/visible-interval'
 import { useEffect, useState } from 'react'
 export function useCommunity (props, local) {
   const [value, setValue] = useState(null)
@@ -13,11 +14,11 @@ export function useCommunity (props, local) {
       } catch { if (active) setValue(null) }
     }
     load()
-    const timer = setInterval(load, 15000)
+    const stopTimer = visibleInterval(load, 15000)
     // A consent change made in the launcher (another window) is pushed by the
     // host, so an open map drops or restores community data at once.
     const stop = props.eventListener ? props.eventListener('goCommunityChanged', () => { if (active) load() }) : () => {}
-    return () => { active = false; clearInterval(timer); stop() }
+    return () => { active = false; stopTimer(); stop() }
   }, [props.stage, props.connected, props.ready, props.role, props.sendEvent, props.eventListener, props.communityVersion, local])
   return value
 }
@@ -28,8 +29,8 @@ export default function GoCommunitySettings ({ sendEvent, onChange }) {
     // This RPC reads shared local cache metadata only; it never fetches EDSM.
     const load = () => sendEvent('getGoCommunity').then(v => { if (active) { setValue(v); setError('') } }).catch(() => { if (active) setError('Community settings unavailable') })
     load()
-    const timer = setInterval(load, 15000)
-    return () => { active = false; clearInterval(timer) }
+    const stopTimer = visibleInterval(load, 15000)
+    return () => { active = false; stopTimer() }
   }, [sendEvent])
   const setEnabled = async enabled => {
     setBusy(true); setError('')

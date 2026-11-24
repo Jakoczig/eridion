@@ -1,3 +1,4 @@
+import { visibleInterval } from '../lib/visible-interval'
 import { useEffect, useState } from 'react'
 import { Icon, Metric } from './go-terminal-widgets'
 const formatCredits = v => { try { return BigInt(v).toLocaleString() } catch { return '—' } }
@@ -19,7 +20,7 @@ export function commanderRanks (value, commander) {
 export default function GoCommanderOverview ({ workspace, role, sendEvent }) {
   const [value, setValue] = useState(null)
   const commander = workspace?.activity?.commander || {}
-  useEffect(() => { let active = true; const load = () => sendEvent('getGoCommanderOverview').then(v => { if (active) setValue(v) }).catch(() => {}); load(); const timer = setInterval(load, 5000); window.addEventListener('eridion-account-changed', load); return () => { active = false; clearInterval(timer); window.removeEventListener('eridion-account-changed', load) } }, [role, sendEvent])
+  useEffect(() => { let active = true; const load = () => sendEvent('getGoCommanderOverview').then(v => { if (active) setValue(v) }).catch(() => {}); load(); const stopTimer = visibleInterval(load, 5000); window.addEventListener('eridion-account-changed', load); return () => { active = false; stopTimer(); window.removeEventListener('eridion-account-changed', load) } }, [role, sendEvent])
   const facts = Object.fromEntries((value?.facts || []).map(f => [f.field, f.value]))
   const ranks = commanderRanks(value, commander)
   const power = (value?.powerplay || []).slice().sort((a, b) => a.at.localeCompare(b.at)).reduce((p, r) => ({ ...p, ...r.details?.fields }), {})

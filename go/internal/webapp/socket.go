@@ -7,6 +7,7 @@ import (
 	"github.com/Jakoczig/eridion/go/internal/paritystate"
 	"net/http"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -132,6 +133,17 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 		recordFrame(value, len(data))
 		return conn.Write(ctx, websocket.MessageText, data)
 	}
+	sendRaw := func(name string, frame []byte) error {
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		if !principal.valid() {
+			return context.Canceled
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		recordFrame(map[string]any{"name": name}, len(frame))
+		return conn.Write(ctx, websocket.MessageText, frame)
+	}
 	if send(map[string]any{"name": "loadingProgress", "message": s.loadingStatus()}) != nil {
 		return
 	}
@@ -173,7 +185,16 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 				case <-readCtx.Done():
 					return
 				case <-ticker.C:
-					if spatialRequested.Load() && s.spatial != nil {
+					// Declared demand gates every push; a hidden display
+					// receives none until it is visible again.
+					d := s.connDemand(conn)
+					want := func(t topic, requested bool) bool {
+						if !d.declared {
+							return requested
+						}
+						return d.allows(t) && requested
+					}
+					if want(topicSpatial, spatialRequested.Load()) && s.spatial != nil {
 						revision := s.spatial.Revision()
 						if revision != spatialRevision {
 							spatialRevision = revision
@@ -184,7 +205,7 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 					}
 					// Audit F8: an EDSM consent change made in the launcher
 					// reaches every open community consumer at once.
-					if base := communityBase.Load(); base != 0 && s.community != nil {
+					if base := communityBase.Load(); base != 0 && s.community != nil && want(topicCommunity, true) {
 						revision, enabled := s.community.Revision()
 						if revision+1 != base {
 							communityBase.Store(revision + 1)
@@ -193,7 +214,7 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 							}
 						}
 					}
-					if principal.role == "owner" && providerRequested.Load() && s.providers != nil {
+					if principal.role == "owner" && want(topicProviders, providerRequested.Load()) && s.providers != nil {
 						v := s.providers.Status()
 						if !reflect.DeepEqual(previousProviders, v) {
 							previousProviders = v
@@ -202,7 +223,7 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 							}
 						}
 					}
-					if !contextRequested.Load() {
+					if !want(topicContext, contextRequested.Load()) {
 						continue
 					}
 					v := s.contextView(principal)
@@ -217,18 +238,36 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 		}()
 	}
 
+	resyncSummary := make(chan struct{}, 1)
 	if s.game != nil {
 		changes, unsubscribe := s.game.Subscribe(readCtx)
 		defer unsubscribe()
 		go func() {
+			// A hidden display (declared visible=false) receives no summary
+			// updates; the latest one is sent when it is visible again.
+			var held *gamestate.Summary
 			for {
 				select {
 				case <-readCtx.Done():
 					return
+				case <-resyncSummary:
+					if d := s.connDemand(conn); held != nil && (!d.declared || d.visible) {
+						summary := *held
+						held = nil
+						if send(map[string]any{"name": "journalSummaryChanged", "message": summary}) != nil {
+							conn.CloseNow()
+							return
+						}
+					}
 				case summary, ok := <-changes:
 					if !ok {
 						return
 					}
+					if d := s.connDemand(conn); d.declared && !d.visible {
+						held = &summary
+						continue
+					}
+					held = nil
 					if send(map[string]any{"name": "journalSummaryChanged", "message": summary}) != nil {
 						conn.CloseNow()
 						return
@@ -240,65 +279,112 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 			}
 		}()
 	}
+	// Demand (G3K PERF-06): legacy until the client declares it.
+	s.registerDemand(conn)
+	defer s.updateDemand(conn, connDemand{}, true)
+	resync := make(chan struct{}, 1)
 	if s.g2b && s.game != nil {
 		changes, unsubscribe := s.game.SubscribeProjections(readCtx)
-		var previous *gamestate.Projections
 		defer unsubscribe()
 		go func() {
+			var latest *gamestate.Projections
+			var sent gamestate.Revisions
+			first := true
+			// sendTopic sends a domain value encoded once for every connection.
+			sendTopicKeyed := func(key, name string, revision uint64, value any) error {
+				frame, err := s.payloads.frame(key, name, revision, value)
+				if err != nil {
+					return err
+				}
+				return sendRaw(name, frame)
+			}
+			sendTopic := func(name string, revision uint64, value any) error {
+				return sendTopicKeyed(name, name, revision, value)
+			}
+			evaluate := func(p gamestate.Projections) bool {
+				d := s.connDemand(conn)
+				legacy := !d.declared
+				want := func(t topic, requested bool) bool {
+					if legacy {
+						return requested
+					}
+					return d.allows(t)
+				}
+				changed := func(cur, last uint64) bool { return first || cur != last || !s.g2e }
+				if want(topicNavigation, true) && changed(p.Revisions.Navigation, sent.Navigation) {
+					if sendTopic("goNavigationChanged", p.Revisions.Navigation, p.Navigation) != nil {
+						return false
+					}
+					sent.Navigation = p.Revisions.Navigation
+				}
+				if len(p.Navigation.Hops) > 0 && navRequested.Load() {
+					navDelivered.Store(true)
+				}
+				if want(topicExploration, true) && changed(p.Revisions.Exploration, sent.Exploration) {
+					if sendTopic("goExplorationChanged", p.Revisions.Exploration, p.Exploration) != nil {
+						return false
+					}
+					sent.Exploration = p.Revisions.Exploration
+				}
+				if len(p.Exploration.Bodies) > 0 && surveyRequested.Load() {
+					surveyDelivered.Store(true)
+				}
+				if s.g2d && want(topicShip, shipRequested.Load()) && changed(p.Revisions.Ship, sent.Ship) {
+					if sendTopic("goShipChanged", p.Revisions.Ship, p.Ship) != nil {
+						return false
+					}
+					sent.Ship = p.Revisions.Ship
+					if p.Ship.ShipType != "" {
+						shipDelivered.Store(true)
+					}
+				}
+				if s.g2e && want(topicWorkspace, workspaceRequested.Load()) && p.Workspace != nil {
+					if first || p.Revisions.Workspace != sent.Workspace {
+						if sendTopicKeyed("goWorkspaceChanged:"+strconv.FormatUint(p.Revisions.Flight, 10), "goWorkspaceChanged", p.Revisions.Workspace, p.Workspace) != nil {
+							return false
+						}
+					} else if p.Revisions.Flight != sent.Flight {
+						if sendTopic("goFlightChanged", p.Revisions.Flight, p.Workspace.Parity.Status) != nil {
+							return false
+						}
+					}
+					sent.Workspace, sent.Flight = p.Revisions.Workspace, p.Revisions.Flight
+					if len(p.Workspace.Parity.Modules) > 0 {
+						workspaceDelivered.Store(true)
+					}
+				}
+				first = false
+				navigationReady()
+				return true
+			}
 			for {
 				select {
 				case <-readCtx.Done():
 					return
+				case <-resync:
+					// Demand changed: take a projection published meanwhile
+					// first, then send what the new demand lacks.
+					select {
+					case p, ok := <-changes:
+						if !ok {
+							return
+						}
+						latest = &p
+					default:
+					}
+					if latest != nil && !evaluate(*latest) {
+						conn.CloseNow()
+						return
+					}
 				case p, ok := <-changes:
 					if !ok {
 						return
 					}
-					if (!s.g2e || previous == nil || !reflect.DeepEqual(previous.Navigation, p.Navigation)) && send(map[string]any{"name": "goNavigationChanged", "message": p.Navigation}) != nil {
+					latest = &p
+					if !evaluate(p) {
 						conn.CloseNow()
 						return
 					}
-					if len(p.Navigation.Hops) > 0 && navRequested.Load() {
-						navDelivered.Store(true)
-					}
-					if (!s.g2e || previous == nil || !reflect.DeepEqual(previous.Exploration, p.Exploration)) && send(map[string]any{"name": "goExplorationChanged", "message": p.Exploration}) != nil {
-						conn.CloseNow()
-						return
-					}
-					if len(p.Exploration.Bodies) > 0 && surveyRequested.Load() {
-						surveyDelivered.Store(true)
-					}
-					if s.g2d && shipRequested.Load() && (!s.g2e || previous == nil || !reflect.DeepEqual(previous.Ship, p.Ship)) {
-						if send(map[string]any{"name": "goShipChanged", "message": p.Ship}) != nil {
-							conn.CloseNow()
-							return
-						}
-						if p.Ship.ShipType != "" {
-							shipDelivered.Store(true)
-						}
-					}
-					if s.g2e && workspaceRequested.Load() && p.Workspace != nil {
-						var old *gamestate.WorkspaceView
-						if previous != nil {
-							old = previous.Workspace
-						}
-						if !sameStaticWorkspace(old, p.Workspace) {
-							if send(map[string]any{"name": "goWorkspaceChanged", "message": p.Workspace}) != nil {
-								conn.CloseNow()
-								return
-							}
-						} else if !reflect.DeepEqual(old.Parity.Status, p.Workspace.Parity.Status) {
-							if send(map[string]any{"name": "goFlightChanged", "message": p.Workspace.Parity.Status}) != nil {
-								conn.CloseNow()
-								return
-							}
-						}
-						if len(p.Workspace.Parity.Modules) > 0 {
-							workspaceDelivered.Store(true)
-						}
-					}
-					previous = &p
-					navigationReady()
-
 				}
 			}
 		}()
@@ -349,6 +435,24 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 			continue
 		}
 		switch request.Name {
+		case "setGoDemand":
+			d, err := parseDemand(request.Message)
+			if err != nil {
+				response["error"] = err.Error()
+				break
+			}
+			cur, applied := s.updateDemand(conn, d, false)
+			response["message"] = map[string]any{"generation": strconv.FormatUint(cur.generation, 10), "applied": applied}
+			if applied {
+				select {
+				case resync <- struct{}{}:
+				default:
+				}
+				select {
+				case resyncSummary <- struct{}{}:
+				default:
+				}
+			}
 		case "getLoadingStatus":
 			response["message"] = s.loadingStatus()
 		case "hostInfo":

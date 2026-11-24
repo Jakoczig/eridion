@@ -1,3 +1,4 @@
+import { visibleInterval } from '../lib/visible-interval'
 import { useEffect, useState } from 'react'
 import GoHistoryControls from './go-history-controls'
 
@@ -23,8 +24,8 @@ function HistoryWorkspace ({ sendEvent }) {
     const load = async () => { try { const v = await sendEvent('getGoDataStatus'); if (active) { setStatus(v); setFID(v.commanders?.[0]?.fid || '') } } catch { if (active) setNotice('Database status unavailable; history has not been reset.') } }
     load()
     sendEvent('getGoProviders').then(v => { if (active) setProviders(v.filter(p => p.capability.upload?.length)) }).catch(() => {})
-    const timer = setInterval(load, 3000)
-    return () => { active = false; clearInterval(timer) }
+    const stopTimer = visibleInterval(load, 3000)
+    return () => { active = false; stopTimer() }
   }, [sendEvent])
   useEffect(() => {
     let active = true

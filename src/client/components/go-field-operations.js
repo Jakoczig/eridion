@@ -1,18 +1,23 @@
 import { useState, useEffect, useRef } from 'react'
+import { visibleInterval } from '../lib/visible-interval'
 
 // Ordered field reads (Task 18 / F22). One request is in flight at a time;
 // invalidations received meanwhile coalesce into a single follow-up. A reply
 // is applied only if it answers the newest request of the current context
 // (method, query/body, connection) and, for BioScan, names the requested body
 // and carries the rule revision already shown for this connection.
+// activeCycle: a BioScan view during a Log/Sample cycle (live spacing).
+export const activeCycle = v => !!(v && (v.liveSpacing || (v.samples && v.samples[0] && (v.samples[0].stage === 'Log' || v.samples[0].stage === 'Sample'))))
+
 export function useFieldRead (props, method, body = '') {
   const [value, setValue] = useState(null); const [notice, setNotice] = useState(''); const [revision, setRevision] = useState(0)
   const shownVersion = useRef('')
+  const latest = useRef(null)
   const refresh = () => setRevision(n => n + 1)
   useEffect(() => {
     const context = { active: true, seq: 0, inFlight: false, again: false }
     let timer
-    setValue(null); setNotice(''); shownVersion.current = ''
+    setValue(null); setNotice(''); shownVersion.current = ''; latest.current = null
     if (!props.connected || !props.ready) return () => { context.active = false }
     const message = method === 'getGoBGSTally' ? JSON.parse(body) : body ? { body } : {}
     const accept = v => {
@@ -31,7 +36,7 @@ export function useFieldRead (props, method, body = '') {
       try {
         const v = await props.sendEvent(method, message)
         if (context.active && seq === context.seq && v?.stale) context.again = true // context moved during the read: keep the view, read again
-        else if (context.active && seq === context.seq && accept(v)) { if (v?.version) shownVersion.current = v.version; setValue(v); setNotice('') }
+        else if (context.active && seq === context.seq && accept(v)) { if (v?.version) shownVersion.current = v.version; latest.current = v; setValue(v); setNotice('') }
       } catch (e) {
         if (context.active && seq === context.seq) setNotice(e.message || 'Field projection unavailable')
       } finally {
@@ -40,9 +45,13 @@ export function useFieldRead (props, method, body = '') {
       }
     }
     load()
-    const liveTimer = method === 'getGoBioScan' ? setInterval(load, 1500) : null
+    // Live sample spacing follows Status positions, which have no journal
+    // notification: poll only while a Log/Sample cycle is active and the
+    // document is visible (G3K PERF-06). Otherwise journal invalidation
+    // keeps the view current.
+    const liveTimer = method === 'getGoBioScan' ? visibleInterval(() => { if (activeCycle(latest.current)) load() }, 1500) : null
     const stop = props.eventListener('journalSummaryChanged', () => { clearTimeout(timer); timer = setTimeout(load, 200) })
-    return () => { context.active = false; clearTimeout(timer); if (liveTimer) clearInterval(liveTimer); stop() }
+    return () => { context.active = false; clearTimeout(timer); if (liveTimer) liveTimer(); stop() }
   }, [props.connected, props.ready, props.sendEvent, props.eventListener, method, body, revision])
   return { value, notice, refresh }
 }

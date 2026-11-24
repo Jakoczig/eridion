@@ -1,3 +1,4 @@
+import { visibleInterval } from '../lib/visible-interval'
 import { useEffect, useState } from 'react'
 import GoCommunitySettings from './go-community'
 import { providerHealth } from './go-launcher-status'
@@ -11,7 +12,7 @@ function Provider ({ value, sendEvent, refresh }) {
 export function ProviderDiagnostics (props) {
   const [values, setValues] = useState([]); const [error, setError] = useState('')
   const refresh = async () => { try { setValues(await props.sendEvent('getGoProviders')) } catch { setError('Provider status unavailable; no connection is assumed.') } }
-  useEffect(() => { refresh(); const timer = setInterval(refresh, 5000); return () => clearInterval(timer) }, [props.sendEvent])
+  useEffect(() => { refresh(); return visibleInterval(refresh, 5000) }, [props.sendEvent])
   return <section className='go-provider-settings'><GoCommunitySettings {...props} /><h2>Optional account & community providers</h2><p>All new reads and uploads start OFF. Viewing a page does not enable traffic. Only the owner can consent, store credentials or request online data. Windows DPAPI / Linux Secret Service protect credentials. Responses are bounded and cached; no public feed runs in the background.</p>{error && <p role='alert'>{error}</p>}{[['Official / Account', ['frontier', 'inara', 'edsm']], ['Galaxy / Nearest', ['spansh', 'edsm-reference']], ['Community Upload', ['eddn', 'edastro']], ['BGS / Colonisation / Science', ['elitebgs', 'raven', 'canonn']]].map(([title, ids]) => <section key={title}><h3>{title}</h3>{values.filter(v => ids.includes(v.capability.id)).map(value => <Provider key={value.capability.id + JSON.stringify(value.config)} value={value} sendEvent={props.sendEvent} refresh={refresh} />)}</section>)}</section>
 }
 

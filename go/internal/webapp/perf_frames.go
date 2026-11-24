@@ -19,3 +19,7 @@ func recordFrame(value any, size int) {
 	perfstats.Add("ws.frames."+name, 1)
 	perfstats.Add("ws.bytes."+name, int64(size))
 }
+
+// recordShared counts a frame whose encoding was reused from another
+// connection.
+func recordShared(name string) { perfstats.Add("ws.shared."+name, 1) }

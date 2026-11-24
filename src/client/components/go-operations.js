@@ -1,3 +1,4 @@
+import { visibleInterval } from '../lib/visible-interval'
 import { useEffect, useState } from 'react'
 import { Badge, Icon } from './go-terminal-widgets'
 import GoCommunityGoals from './go-community-goals'
@@ -37,9 +38,9 @@ export default function GoOperations (props) {
     setPage(null); setPreview(null); setAck(false)
     if (props.connected && props.ready && kind !== 'external') {
       const load = async () => { if (pending) return; pending = true; try { const value = await props.sendEvent('getGoOperations', JSON.parse(query)); if (active) { setPage(value); setNotice('') } } catch (e) { if (active) setNotice('Operations unavailable; journal history retained.') } finally { pending = false } }
-      load(); timer = setInterval(load, 3000)
+      load(); timer = visibleInterval(load, 3000)
     }
-    return () => { active = false; clearInterval(timer) }
+    return () => { active = false; if (timer) timer() }
   }, [props.connected, props.ready, props.sendEvent, query, revision, kind])
   const change = setter => event => { setter(event.target.value); setBefore(''); setPreview(null); setAck(false) }
   if (initial === 'external') return <section className='go-page'><h2>{title}</h2><p>External community reference only. DAEDALUS has no verified consumable PTN/FCOC feed. No scraping or automatic external request.</p><a href={props.path.endsWith('/ptn') ? 'https://pilotstradenetwork.com/' : 'https://inara.cz/elite/squadron/7636/'} target='_blank' rel='noreferrer'>Open community website</a></section>
