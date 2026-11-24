@@ -254,10 +254,10 @@ func TestAuditStationNewInventory(t *testing.T) {
 		out, err := m.stationPayload(kind, object([]byte(head+items+`}`)))
 		return string(out), err
 	}
-	// Publishable: SCO drive, a pre-built variant identified by ID, Python Mk II
+	// Publishable: reviewed SCO drive, a standard module by exact ID, Python Mk II
 	// armour (reviewed ordinary entitlement), a standard module; a tech-broker
 	// unlock (Enzyme Missile Rack) is omitted.
-	out, err := payload("Outfitting", `"Items":[{"id":129030592,"Name":"int_hyperdrive_overcharge_size5_class5"},{"id":129046189,"Name":"hpt_beamlaser_fixed_huge"},{"id":128049431,"Name":"hpt_beamlaser_fixed_huge"},{"id":129030466,"Name":"python_nx_armour_grade1"},{"id":128049513,"Name":"hpt_chafflauncher_tiny"},{"id":128833995,"Name":"hpt_causticmissile_fixed_medium"}]`)
+	out, err := payload("Outfitting", `"Items":[{"id":129030592,"Name":"int_hyperdrive_overcharge_size5_class5"},{"id":128049431,"Name":"hpt_beamlaser_fixed_huge"},{"id":129030466,"Name":"python_nx_armour_grade1"},{"id":128049513,"Name":"hpt_chafflauncher_tiny"},{"id":128833995,"Name":"hpt_causticmissile_fixed_medium"}]`)
 	if err != nil {
 		t.Fatal("new ordinary outfitting suppressed:", err)
 	}
@@ -274,10 +274,14 @@ func TestAuditStationNewInventory(t *testing.T) {
 	}
 	// Suppressed with accurate reasons.
 	for _, tc := range []struct{ kind, items, reason string }{
-		{"Shipyard", `"PriceList":[{"ShipType":"SideWinder"},{"id":129030534,"ShipType":"type8"}]`, "availability not verified for entitlement(s) ELITE_V_TYPE8"},
+		{"Shipyard", `"PriceList":[{"ShipType":"SideWinder"},{"id":129030534,"ShipType":"type8"}]`, "availability not verified for ELITE_V_TYPE8"},
 		{"Outfitting", `"Items":[{"id":128049513,"Name":"hpt_chafflauncher_tiny"},{"id":129030535,"Name":"type8_armour_grade1"}]`, "ELITE_V_TYPE8"},
 		{"Outfitting", `"Items":[{"id":128049513,"Name":"hpt_chafflauncher_tiny"},{"Name":"hpt_causticmissile_fixed_medium"}]`, "shared symbol and no numeric ID"},
 		{"Outfitting", `"Items":[{"id":128049513,"Name":"hpt_chafflauncher_tiny"},{"id":129999999,"Name":"hpt_future_weapon_fixed_small"}]`, "not classified by the bundled catalogue"},
+		// G3I review F4: a pre-engineered variant added by the refresh with a
+		// blank entitlement is not evidence of public stock.
+		{"Outfitting", `"Items":[{"id":128049431,"Name":"hpt_beamlaser_fixed_huge"},{"id":129046189,"Name":"hpt_beamlaser_fixed_huge"}]`, "availability not verified for unreviewed item 129046189"},
+		{"Outfitting", `"Items":[{"id":128049513,"Name":"hpt_chafflauncher_tiny"},{"id":129041074,"Name":"int_mkiiagileboost_engine_size5_class5"}]`, "unreviewed item 129041074"},
 	} {
 		if out, err := payload(tc.kind, tc.items); err == nil || !strings.Contains(err.Error(), tc.reason) {
 			t.Fatalf("%s %s: published or wrong reason (%v): %s", tc.kind, tc.items, err, out)

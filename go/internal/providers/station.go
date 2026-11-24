@@ -207,6 +207,13 @@ func (m *Manager) stationPayload(kind string, v map[string]any) ([]byte, error) 
 			case catalog.InventoryExcluded:
 				// Commander-, rank- or unlock-dependent: omitted by design.
 			case catalog.InventoryUnverified:
+				if entitlement == "" || entitlement == "ELITE_HORIZONS_V_PLANETARY_LANDINGS" {
+					// Added after the reviewed catalogue: name the ID instead.
+					entitlement = "unreviewed item " + id
+					if id == "" {
+						entitlement = "unreviewed item " + name
+					}
+				}
 				unverified[entitlement] = true
 			case catalog.InventoryAmbiguous:
 				ambiguous++
@@ -228,7 +235,10 @@ func (m *Manager) stationPayload(kind string, v map[string]any) ([]byte, error) 
 					names = append(names, e)
 				}
 				sort.Strings(names)
-				parts = append(parts, "availability not verified for entitlement(s) "+strings.Join(names, ", "))
+				if len(names) > 8 {
+					names = append(names[:8], fmt.Sprintf("%d more", len(names)-8))
+				}
+				parts = append(parts, "availability not verified for "+strings.Join(names, ", "))
 			}
 			return nil, fmt.Errorf("%s snapshot not published: %s; a partial inventory is never sent", kind, strings.Join(parts, "; "))
 		}

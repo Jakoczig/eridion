@@ -3,6 +3,7 @@ package catalog
 import (
 	"encoding/csv"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -25,13 +26,24 @@ const (
 	InventoryAmbiguous  = "ambiguous"  // shared symbol without a numeric ID
 )
 
-type inventoryEntry struct{ symbol, entitlement string }
+type inventoryEntry struct{ id, symbol, entitlement string }
 type entitlementRule struct{ pattern, class string }
 
 var inventoryOnce sync.Once
 var inventoryByID map[string]map[string]inventoryEntry
 var inventoryBySymbol map[string]map[string][]inventoryEntry
 var entitlementRules []entitlementRule
+
+// idReview holds per-ID decisions from inventory-id-review.csv; IDs above
+// idWatermark (added by the G3I refresh) with a generic entitlement need one.
+var idReview map[string]string
+var idWatermark uint64
+
+// genericEntitlement marks entitlement values that say nothing about how an
+// individual item is unlocked: the empty value and the Horizons SKU.
+func genericEntitlement(e string) bool {
+	return e == "" || e == "ELITE_HORIZONS_V_PLANETARY_LANDINGS"
+}
 
 // eddnModuleSymbol is the outfitting/2 module pattern; other symbols
 // (paint jobs, decals, bobbleheads, ...) are not station modules.
@@ -53,7 +65,7 @@ func loadInventory() {
 			cols[h] = i
 		}
 		for _, row := range rows[1:] {
-			e := inventoryEntry{symbol: row[cols["symbol"]], entitlement: row[cols["entitlement"]]}
+			e := inventoryEntry{id: row[cols["id"]], symbol: row[cols["symbol"]], entitlement: row[cols["entitlement"]]}
 			inventoryByID[kind][row[cols["id"]]] = e
 			k := strings.ToLower(e.symbol)
 			inventoryBySymbol[kind][k] = append(inventoryBySymbol[kind][k], e)
@@ -66,6 +78,19 @@ func loadInventory() {
 			continue
 		}
 		entitlementRules = append(entitlementRules, entitlementRule{row[0], row[1]})
+	}
+	idReview = map[string]string{}
+	b, _ = data.ReadFile("inventory-id-review.csv")
+	rows, _ = csv.NewReader(strings.NewReader(string(b))).ReadAll()
+	for i, row := range rows {
+		if i == 0 || len(row) < 2 {
+			continue
+		}
+		if row[0] == "watermark" {
+			idWatermark, _ = strconv.ParseUint(row[1], 10, 64)
+			continue
+		}
+		idReview[row[0]] = row[1]
 	}
 }
 
@@ -88,7 +113,13 @@ func classify(kind string, e inventoryEntry) string {
 	if kind == "outfitting" && strings.EqualFold(e.symbol, "Int_PlanetApproachSuite") {
 		return InventoryExcluded // fitted to every Horizons ship; not station stock
 	}
-	switch entitlementClass(e.entitlement) {
+	class := entitlementClass(e.entitlement)
+	if c, ok := idReview[e.id]; ok {
+		class = c
+	} else if n, err := strconv.ParseUint(e.id, 10, 64); err == nil && n > idWatermark && genericEntitlement(e.entitlement) {
+		class = "unverified" // added after the reviewed catalogue; needs a per-ID review
+	}
+	switch class {
 	case "ordinary":
 		return InventoryPublic
 	case "excluded":
