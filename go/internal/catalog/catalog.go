@@ -8,13 +8,14 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"unicode"
 )
 
-//go:embed *.csv modules.json
+//go:embed *.csv modules.json collisions-reviewed.txt entitlement-review.csv
 var data embed.FS
 
 type Module struct {
@@ -24,12 +25,26 @@ type Module struct {
 }
 
 var once sync.Once
+
+// modules holds reference data for symbols that identify exactly one module
+// (and, for a shared symbol, its standard module; see ResolveModule).
 var modules map[string]Module
 var labels map[string]string
+
+// Entry is one outfitting row, keyed first by its exact numeric ID (Task 16).
+type Entry struct {
+	ID, Symbol, Category, Name, Mount, Guidance, Ship, Rating, Entitlement string
+	Class                                                                  *int
+}
+
+var entries map[string]Entry       // numeric ID -> entry
+var candidates map[string][]string // moduleKey(symbol) -> IDs, ascending
 
 func initData() {
 	modules = map[string]Module{}
 	labels = map[string]string{}
+	entries = map[string]Entry{}
+	candidates = map[string][]string{}
 	for _, filename := range []string{"shipyard.csv", "outfitting.csv", "material.csv", "microresources.csv", "commodity.csv"} {
 		b, _ := data.ReadFile(filename)
 		rows, err := csv.NewReader(strings.NewReader(string(b))).ReadAll()
@@ -50,14 +65,27 @@ func initData() {
 				continue
 			}
 			key := moduleKey(row[symbolCol])
-			labels[strings.ToLower(row[symbolCol])] = row[nameCol]
-			if filename == "outfitting.csv" {
-				v := Module{Source: "bundled_edcd_coriolis_reference", Name: row[nameCol], Rating: row[cols["rating"]]}
-				if n, e := strconv.Atoi(row[cols["class"]]); e == nil && n >= 0 && n <= 8 {
-					v.Class = &n
-				}
-				modules[key] = v
+			if filename != "outfitting.csv" {
+				labels[strings.ToLower(row[symbolCol])] = row[nameCol]
+				continue
 			}
+			e := Entry{ID: row[cols["id"]], Symbol: row[symbolCol], Category: row[cols["category"]], Name: row[nameCol], Mount: row[cols["mount"]], Guidance: row[cols["guidance"]], Ship: row[cols["ship"]], Rating: row[cols["rating"]], Entitlement: row[cols["entitlement"]]}
+			if n, err := strconv.Atoi(row[cols["class"]]); err == nil && n >= 0 && n <= 8 {
+				e.Class = &n
+			}
+			entries[e.ID] = e
+			candidates[key] = append(candidates[key], e.ID)
+		}
+	}
+	// Reference data per symbol. A shared symbol's reference describes its
+	// standard module: the lowest ID (every reviewed collision is a standard
+	// module plus newer pre-built variants; collisions-reviewed.txt).
+	for key, ids := range candidates {
+		sort.Slice(ids, func(i, j int) bool { return numericLess(ids[i], ids[j]) })
+		e := entries[ids[0]]
+		modules[key] = Module{Source: "bundled_edcd_coriolis_reference", Name: e.Name, Rating: e.Rating, Class: e.Class}
+		if len(ids) == 1 {
+			labels[strings.ToLower(e.Symbol)] = e.Name
 		}
 	}
 	b, _ := data.ReadFile("modules.json")
@@ -93,8 +121,15 @@ func copyPtr[T any](p *T) *T {
 	v := *p
 	return &v
 }
+
+// ModuleBySymbol returns reference data for a symbol that identifies exactly
+// one module. A symbol shared by several variants is not resolved here; use
+// ResolveModule with the observation's numeric ID or engineering evidence.
 func ModuleBySymbol(symbol string) (Module, bool) {
 	once.Do(initData)
+	if len(candidates[moduleKey(symbol)]) > 1 {
+		return Module{}, false
+	}
 	m, ok := modules[moduleKey(symbol)]
 	if !ok && moduleKey(symbol) == "intfighterbaymk2s" {
 		m = Module{Name: "Fighter Hangar Mk II", Source: "symbol_display_name_only", Description: "Display name only; class, rating and performance not verified."}
@@ -128,6 +163,9 @@ var wordBreak = regexp.MustCompile(`([a-z])([A-Z0-9])`)
 func ModuleDisplayName(symbol string) string {
 	if m, ok := ModuleBySymbol(symbol); ok && m.Name != "" {
 		return m.Name
+	}
+	if names := candidateNames(symbol); len(names) > 1 {
+		return strings.Join(names, " or ")
 	}
 	s := strings.Trim(strings.TrimSpace(symbol), "$;")
 	s = wordBreak.ReplaceAllString(s, "$1 $2")

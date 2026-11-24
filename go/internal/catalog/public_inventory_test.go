@@ -33,3 +33,46 @@ func TestAuditPublicInventoryClassification(t *testing.T) {
 		}
 	}
 }
+
+// G3I review F4: a blank (or Horizons) entitlement on an ID added by the G3I
+// refresh is not evidence of public stock; such IDs need a per-ID review.
+func TestAuditNewIDsNeedReview(t *testing.T) {
+	for _, c := range []struct{ kind, id, symbol, want string }{
+		{"outfitting", "128049431", "Hpt_BeamLaser_Fixed_Huge", InventoryPublic},                   // pre-refresh, blank entitlement
+		{"outfitting", "129030592", "Int_Hyperdrive_Overcharge_Size5_Class5", InventoryPublic},     // SCO 2-7, reviewed
+		{"outfitting", "129036580", "Int_Hyperdrive_Overcharge_Size8_Class5", InventoryUnverified}, // SCO size 8, no evidence
+		{"outfitting", "129041074", "Int_MkIIAgileBoost_Engine_Size5_Class5", InventoryUnverified}, // Mk II reward
+		{"outfitting", "129038968", "Int_Hyperdrive_Overcharge_Size8_Class5_OverchargeBooster_MkII", InventoryUnverified},
+		{"outfitting", "129046189", "Hpt_BeamLaser_Fixed_Huge", InventoryUnverified},             // pre-engineered
+		{"outfitting", "129022079", "Hpt_ATDumbfireMissile_Fixed_Large_V2", InventoryUnverified}, // new, Horizons entitlement
+		{"outfitting", "129030049", "Hpt_ATVentDisruptorPylon_Fixed_Medium", InventoryExcluded},  // Guardian broker
+		{"outfitting", "129019260", "Int_ExpModuleStabiliser_Size3_Class3", InventoryExcluded},   // tech broker
+		{"outfitting", "129030466", "Python_NX_Armour_Grade1", InventoryPublic},                  // specific reviewed entitlement
+		{"shipyard", "129030464", "Python_NX", InventoryPublic},
+	} {
+		if _, got, _ := ClassifyInventory(c.kind, c.id, c.symbol); got != c.want {
+			t.Errorf("%s %s %s = %s, want %s", c.kind, c.id, c.symbol, got, c.want)
+		}
+	}
+	// Without an ID, a shared symbol whose variants now differ is ambiguous.
+	if _, got, _ := ClassifyInventory("outfitting", "", "Hpt_BeamLaser_Fixed_Huge"); got != InventoryAmbiguous {
+		t.Errorf("shared symbol without ID = %s", got)
+	}
+}
+
+func TestInventoryIDReviewIsWellFormed(t *testing.T) {
+	inventoryOnce.Do(loadInventory)
+	if idWatermark == 0 {
+		t.Fatal("inventory-id-review.csv watermark missing")
+	}
+	for id, class := range idReview {
+		if _, ok := inventoryByID["outfitting"][id]; !ok {
+			if _, ok := inventoryByID["shipyard"][id]; !ok {
+				t.Errorf("reviewed ID %s is not in the catalogue", id)
+			}
+		}
+		if class != "ordinary" && class != "excluded" {
+			t.Errorf("reviewed ID %s has classification %q", id, class)
+		}
+	}
+}

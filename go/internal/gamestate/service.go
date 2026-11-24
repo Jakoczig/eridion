@@ -72,6 +72,9 @@ type Service struct {
 	needsStartupRebuild bool
 	accounts            AccountSettings
 	accountsError       string
+	// frontierModules caches, per commander, the Frontier module IDs that
+	// passed ship verification (Task 16), refreshed at most every 30 s.
+	frontierModules map[string]frontierModuleCache
 	// defaultInvalid explains why the stored default (or a migrated legacy
 	// selection) is not used: it names no verified commander once history is
 	// complete. The launcher asks once; providers stay blocked meanwhile.

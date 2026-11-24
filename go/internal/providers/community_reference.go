@@ -29,7 +29,11 @@ func communityEndpoint(id, kind, query string, page int) (string, error) {
 		if query == "" || len(query) > 128 || strings.ContainsAny(query, "\x00\r\n,;") {
 			break
 		}
-		return "https://elitebgs.app/api/ebgs/v5/" + kind + "?" + url.Values{"name": {query}, "page": {strconv.Itoa(page)}, "count": {"20"}}.Encode(), nil
+		// Current state only: on the v5 systems/factions/stations routes
+		// (elite-kode/elitebgs d458e6fc) `count` is "Number of history
+		// records" and switches the reply to history mode, so it is never
+		// sent for a current lookup (Task 17).
+		return "https://elitebgs.app/api/ebgs/v5/" + kind + "?" + url.Values{"name": {query}, "page": {strconv.Itoa(page)}}.Encode(), nil
 	case "canonn":
 		collection := canonnCollections[kind]
 		if collection == "" || !canonicalID(query) {

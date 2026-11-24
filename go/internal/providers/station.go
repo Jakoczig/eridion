@@ -7,6 +7,7 @@ import (
 	"github.com/Jakoczig/eridion/go/internal/catalog"
 	"github.com/Jakoczig/eridion/go/internal/journal"
 	"github.com/Jakoczig/eridion/go/internal/sidecar"
+	"sort"
 	"strings"
 	"time"
 )
@@ -99,7 +100,7 @@ func (m *Manager) publishStationLocked(kind string) {
 	payload, err := m.stationPayload(kind, v)
 	if err != nil {
 		s.lastError = "Station message lacked verified public fields; not queued"
-		if strings.Contains(err.Error(), "not classified") {
+		if strings.Contains(err.Error(), "snapshot not published") {
 			s.lastError = err.Error() // honest suppression reason (Task 8 / F09)
 		}
 		return
@@ -184,7 +185,8 @@ func (m *Manager) stationPayload(kind string, v map[string]any) ([]byte, error) 
 		}
 		out := []string{}
 		seen := map[string]bool{}
-		unknown := 0
+		unknown, ambiguous := 0, 0
+		unverified := map[string]bool{}
 		for _, item := range items {
 			o, _ := item.(map[string]any)
 			name := text(o[nameKey])
@@ -195,18 +197,50 @@ func (m *Manager) stationPayload(kind string, v map[string]any) ([]byte, error) 
 			if n, ok := o["id"].(json.Number); ok {
 				id = n.String()
 			}
-			canonical, permitted, known := catalog.PublicInventorySymbol(catalogKind, id, name)
-			if !known {
+			canonical, class, entitlement := catalog.ClassifyInventory(catalogKind, id, name)
+			switch class {
+			case catalog.InventoryPublic:
+				if !seen[canonical] {
+					out = append(out, canonical)
+					seen[canonical] = true
+				}
+			case catalog.InventoryExcluded:
+				// Commander-, rank- or unlock-dependent: omitted by design.
+			case catalog.InventoryUnverified:
+				if entitlement == "" || entitlement == "ELITE_HORIZONS_V_PLANETARY_LANDINGS" {
+					// Added after the reviewed catalogue: name the ID instead.
+					entitlement = "unreviewed item " + id
+					if id == "" {
+						entitlement = "unreviewed item " + name
+					}
+				}
+				unverified[entitlement] = true
+			case catalog.InventoryAmbiguous:
+				ambiguous++
+			default:
 				unknown++
-				continue
-			}
-			if permitted && !seen[canonical] {
-				out = append(out, canonical)
-				seen[canonical] = true
 			}
 		}
-		if unknown > 0 {
-			return nil, fmt.Errorf("%s snapshot not published: %d item(s) not classified by the bundled catalogue; a partial inventory is never sent", kind, unknown)
+		if unknown+ambiguous+len(unverified) > 0 {
+			var parts []string
+			if unknown > 0 {
+				parts = append(parts, fmt.Sprintf("%d item(s) not classified by the bundled catalogue", unknown))
+			}
+			if ambiguous > 0 {
+				parts = append(parts, fmt.Sprintf("%d item(s) with a shared symbol and no numeric ID", ambiguous))
+			}
+			if len(unverified) > 0 {
+				names := []string{}
+				for e := range unverified {
+					names = append(names, e)
+				}
+				sort.Strings(names)
+				if len(names) > 8 {
+					names = append(names[:8], fmt.Sprintf("%d more", len(names)-8))
+				}
+				parts = append(parts, "availability not verified for "+strings.Join(names, ", "))
+			}
+			return nil, fmt.Errorf("%s snapshot not published: %s; a partial inventory is never sent", kind, strings.Join(parts, "; "))
 		}
 		if len(out) == 0 {
 			return fail()

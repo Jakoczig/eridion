@@ -7,6 +7,7 @@ import (
 	"errors"
 	"github.com/Jakoczig/eridion/go/internal/catalog"
 	"github.com/Jakoczig/eridion/go/internal/history"
+	"github.com/Jakoczig/eridion/go/internal/paritystate"
 	"github.com/Jakoczig/eridion/go/internal/privatefs"
 	"os"
 	"strconv"
@@ -430,4 +431,50 @@ func decimalText(v *float64) *string {
 	}
 	text := strconv.FormatFloat(*v, 'f', -1, 64)
 	return &text
+}
+
+type frontierModuleCache struct {
+	at     time.Time
+	shipID string // Frontier's current ship the refs belong to
+	refs   []paritystate.ModuleRef
+}
+
+// frontierModuleRefsLocked returns the module IDs from fresh, validated
+// Frontier current-ship evidence for this commander, only when Frontier's
+// current ship is the journal's verified current ship (same ship ID). The
+// cache holds Frontier's evidence; the ship binding is checked on every read,
+// so a swap inside the cache window never inherits another ship's IDs.
+func (s *Service) frontierModuleRefsLocked(fid string) []paritystate.ModuleRef {
+	if fid == "" || s.store == nil {
+		return nil
+	}
+	c, ok := s.frontierModules[fid]
+	if !ok || time.Since(c.at) >= 30*time.Second {
+		c = frontierModuleCache{at: time.Now()}
+		if ship, ok := history.ResolveCurrentShip(s.factsLocked(context.Background(), fid)); ok && ship.ID != "" {
+			c.shipID = ship.ID
+			for _, m := range ship.Modules {
+				c.refs = append(c.refs, paritystate.ModuleRef{Slot: m.Slot, Item: m.Item, ID: m.ID})
+			}
+		}
+		if s.frontierModules == nil {
+			s.frontierModules = map[string]frontierModuleCache{}
+		}
+		s.frontierModules[fid] = c
+	}
+	if c.shipID == "" || c.shipID != s.views.ship.Identity(fid) {
+		return nil
+	}
+	return c.refs
+}
+
+// FrontierEvidenceChanged drops cached Frontier module evidence and forces
+// the projections to rebuild; call it after Frontier facts are saved.
+func (s *Service) FrontierEvidenceChanged() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.frontierModules = nil
+	s.cachedProjection = nil
+	s.views.dirty = true
+	s.publishProjectionsLocked()
 }

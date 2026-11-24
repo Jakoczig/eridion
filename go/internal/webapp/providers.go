@@ -100,7 +100,12 @@ func (s *Server) providerRPC(ctx context.Context, name string, raw json.RawMessa
 		if page == 0 {
 			page = 1
 		}
-		return s.providers.Read(ctx, req.ID, req.Kind, req.Query, page)
+		snapshot, err := s.providers.Read(ctx, req.ID, req.Kind, req.Query, page)
+		if err == nil && req.ID == "frontier" && s.game != nil {
+			// Fresh Frontier facts may carry verified module IDs (Task 16).
+			s.game.FrontierEvidenceChanged()
+		}
+		return snapshot, err
 	default:
 		return nil, errors.New("Unsupported provider action")
 	}

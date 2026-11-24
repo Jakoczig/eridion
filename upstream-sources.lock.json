@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "id": "edcd-fdevids",
+      "repository": "https://github.com/EDCD/FDevIDs",
+      "revision": "c7c29f7a13df543d4bc8b947eab29f88e06100fa",
+      "observedHead": "c7c29f7a13df543d4bc8b947eab29f88e06100fa",
+      "checkedAt": "2026-11-24",
+      "status": "current",
+      "license": "No license file in the repository at this revision. Community-collected Frontier identifiers and English labels; the repository has redistributed these files with EDCD attribution since the inherited application. Frontier retains rights in game data. Recorded per correction plan Task 23; not a new redistribution posture.",
+      "attribution": "Includes game data collated and provided by EDCD (https://github.com/EDCD/FDevIDs).",
+      "notes": "Bundled twice (catalog embed and resources copy); both copies must stay byte-identical. Manual corrections never edit these files: entitlement reviews live in go/internal/catalog/entitlement-review.csv.",
+      "files": [
+        {
+          "path": "shipyard.csv",
+          "sha256": "c7c12f88aac59c9f43eb9ea67697c91d6c1917d064940b37268e2b70cbcbb4bc",
+          "bundled": [
+            "go/internal/catalog/shipyard.csv",
+            "resources/data/edcd/fdevids/shipyard.csv"
+          ]
+        },
+        {
+          "path": "outfitting.csv",
+          "sha256": "6648f1554f11c2849382861f8110dea7907d00ccd96d6fc2471573d6068dfc64",
+          "bundled": [
+            "go/internal/catalog/outfitting.csv",
+            "resources/data/edcd/fdevids/outfitting.csv"
+          ]
+        },
+        {
+          "path": "commodity.csv",
+          "sha256": "b2ae885fcdf8a3eff8ad7a81d449fe7dbea032d0546c32f4fc61bc4b199bebde",
+          "bundled": [
+            "go/internal/catalog/commodity.csv",
+            "resources/data/edcd/fdevids/commodity.csv"
+          ]
+        },
+        {
+          "path": "material.csv",
+          "sha256": "a838e70ad891cb1cff7b9b4de96777a4f53ad1253937486aa12bcb3d93c3ff4c",
+          "bundled": [
+            "go/internal/catalog/material.csv",
+            "resources/data/edcd/fdevids/material.csv"
+          ]
+        },
+        {
+          "path": "microresources.csv",
+          "sha256": "3c3505bf30ff0fbf13ef39725f55d0162bdf4a1a6747901ef87ba17a43dc1371",
+          "bundled": [
+            "go/internal/catalog/microresources.csv",
+            "resources/data/edcd/fdevids/microresources.csv"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "edcd-eddn-schemas",
+      "repository": "https://github.com/EDCD/EDDN",
+      "revision": "153e62426eb58b6cd23def535cb4b7e1082e777f",
+      "observedHead": "153e62426eb58b6cd23def535cb4b7e1082e777f",
+      "checkedAt": "2026-11-24",
+      "status": "current",
+      "license": "BSD-3-Clause (bundled LICENSE).",
+      "attribution": "EDDN schemas (c) 2018 EDDN, BSD-3-Clause.",
+      "notes": "Byte-identical to the G2J pin 4ad669bb7bbe1eae080e4c354e786dca4db91f35; re-verified at the current head. Schema changes require provider contract tests.",
+      "files": [
+        {
+          "path": "schemas/commodity-v3.0.json",
+          "sha256": "315a3a8ba7a6c4d6f3e7cc272db5bee8fcfb3458049a04467774e39fae74209b",
+          "bundled": [
+            "go/internal/providers/schemas/commodity-v3.0.json"
+          ]
+        },
+        {
+          "path": "schemas/journal-v1.0.json",
+          "sha256": "5fe73b26eda01b219248b3de64ad84cebc77b262969f6271e9303c97afac5857",
+          "bundled": [
+            "go/internal/providers/schemas/journal-v1.0.json"
+          ]
+        },
+        {
+          "path": "schemas/outfitting-v2.0.json",
+          "sha256": "6590d8ff496f3773de303d28bcf99cd8f553d560f919b01d5d1be72f726a7e43",
+          "bundled": [
+            "go/internal/providers/schemas/outfitting-v2.0.json"
+          ]
+        },
+        {
+          "path": "schemas/shipyard-v2.0.json",
+          "sha256": "5234674fd56b7ee65c898d8a2c1bb10b25e4a06d414bbba2cdd07538f86e2f0e",
+          "bundled": [
+            "go/internal/providers/schemas/shipyard-v2.0.json"
+          ]
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "ecc6bc066e4b225cb8fbdc03b457d48db750ef01e52090a7e40576db9dcac0a6",
+          "bundled": [
+            "go/internal/providers/schemas/LICENSE"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "coriolis-modules",
+      "repository": "https://github.com/EDCD/coriolis-data",
+      "revision": "",
+      "observedHead": "",
+      "checkedAt": "2026-11-24",
+      "status": "unpinned",
+      "license": "Coriolis distinguishes Frontier-owned game data from MIT-licensed code; the derived stock module statistics are game data. Not refreshed in G3I.",
+      "attribution": "Module reference statistics derived from EDCD Coriolis data.",
+      "notes": "go/internal/catalog/modules.json was derived from the repository's inherited resources/data/edcd/coriolis copy (see PROVENANCE.md); its upstream revision was never recorded. Stock statistics only; catalogue identification does not imply Coriolis/EDSY calculation parity.",
+      "files": [
+        {
+          "path": "modules.json (derived)",
+          "sha256": "0e11dc81d726e2a672fe88826d3e0c6ec45af7f03d73d7668c540640036e9470",
+          "bundled": [
+            "go/internal/catalog/modules.json"
+          ]
+        }
+      ]
+    }
+  ]
+}

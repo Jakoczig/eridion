@@ -323,6 +323,16 @@ func ResolveRanks(facts []EffectiveFact) []ResolvedRank {
 // Frontier evidence. Journal reducers remain the fallback owned by callers.
 type CurrentShipIdentity struct {
 	ID, Name, Model, SystemName, Source, FetchedAt string
+	// Modules are the fitted modules Frontier reported with their numeric
+	// IDs, for slot-verified identification (Task 16).
+	Modules []ShipModuleRef
+}
+
+// ShipModuleRef is one Frontier-reported fitted module.
+type ShipModuleRef struct {
+	Slot string `json:"slot"`
+	Item string `json:"item"`
+	ID   string `json:"id"`
 }
 
 // ResolveCurrentShip returns the Frontier current ship when the effective
@@ -334,16 +344,23 @@ func ResolveCurrentShip(facts []EffectiveFact) (CurrentShipIdentity, bool) {
 			continue
 		}
 		var v struct {
-			ID               string `json:"id"`
-			Model            string `json:"model"`
-			Name             string `json:"name"`
-			SystemName       string `json:"systemName"`
-			CurrentReference bool   `json:"currentReference"`
+			ID               string          `json:"id"`
+			Model            string          `json:"model"`
+			Name             string          `json:"name"`
+			SystemName       string          `json:"systemName"`
+			CurrentReference bool            `json:"currentReference"`
+			Modules          []ShipModuleRef `json:"modules"`
 		}
 		if json.Unmarshal(f.Value, &v) != nil || !v.CurrentReference || identifier(v.ID) == "" {
 			return CurrentShipIdentity{}, false
 		}
-		return CurrentShipIdentity{ID: v.ID, Name: v.Name, Model: v.Model, SystemName: v.SystemName, Source: "frontier", FetchedAt: f.Fetched}, true
+		modules := []ShipModuleRef{}
+		for _, m := range v.Modules {
+			if m.Slot != "" && m.Item != "" && identifier(m.ID) != "" && len(modules) < 128 {
+				modules = append(modules, m)
+			}
+		}
+		return CurrentShipIdentity{ID: v.ID, Name: v.Name, Model: v.Model, SystemName: v.SystemName, Source: "frontier", FetchedAt: f.Fetched, Modules: modules}, true
 	}
 	return CurrentShipIdentity{}, false
 }

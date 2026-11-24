@@ -1,0 +1,13 @@
+entitlement,classification,evidence,reviewed
+,ordinary,No entitlement: ordinary station stock.,2026-11-24
+ELITE_HORIZONS_V_PLANETARY_LANDINGS,ordinary,Horizons content has been included for every Elite Dangerous owner since Frontier made Horizons free (2021); the EDMC EDDN exporter likewise treats the Horizons SKU as public stock.,2026-11-24
+ELITE_V_PYTHON_NX,ordinary,Frontier (official Elite Dangerous account 2024-07-31): Python Mk II available in Odyssey for credits (https://x.com/EliteDangerous/status/1818715793955131618).,2026-11-24
+ELITE_SPECIFIC_V_POWER_*,excluded,PowerPlay rank-dependent modules; the EDDN outfitting/2 schema says to omit rank-dependent PowerPlay faction modules.,2026-11-24
+ELITE_HORIZONS_V_GUARDIAN_*,excluded,Guardian technology broker unlocks are per-commander; EDDN outfitting/2 says to omit commander-dependent items.,2026-11-24
+ELITE_HORIZONS_V_METAHULL,excluded,Human technology broker unlock (per-commander).,2026-11-24
+ELITE_HORIZONS_V_CAUSTIC_*,excluded,Human technology broker unlock (per-commander).,2026-11-24
+ELITE_HORIZONS_V_FLECHETTE_*,excluded,Human technology broker unlock (per-commander).,2026-11-24
+ELITE_HORIZONS_V_PLASMASHOCK_*,excluded,Human technology broker unlock (per-commander).,2026-11-24
+ELITE_HORIZONS_V_CORROSIONCARGO_*,excluded,Human technology broker unlock (per-commander).,2026-11-24
+ELITE_HORIZONS_V_COBRA_MK_IV_1000,excluded,Cobra Mk IV pre-order entitlement (purchase-dependent).,2026-11-24
+removed,excluded,Removed from the game.,2026-11-24

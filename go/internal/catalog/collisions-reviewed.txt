@@ -1,0 +1,27 @@
+# Module symbols shared by several numeric IDs in EDCD/FDevIDs c7c29f7a13df543d4bc8b947eab29f88e06100fa.
+# Reviewed 2026-11-24: each is a standard module (lowest ID) plus newer pre-built
+# variants. A shared symbol is never collapsed: catalog.ResolveModule needs the
+# numeric ID, or resolves to the standard module only when no engineering is
+# reported. A new shared symbol fails TestUpstreamLockConformance until reviewed here.
+Hpt_BasicMissileRack_Fixed_Large 128049494 Seeker Missile Rack | 129045437 Lockdown Seeker Missile Rack | 129046190 Exposing Missiles
+Hpt_BasicMissileRack_Fixed_Medium 128049493 Seeker Missile Rack | 129045434 Drag Seeker Missile Rack | 129045435 Lightweight Thermal Seeker Missile Rack | 129045436 Lockdown Seeker Missile Rack
+Hpt_BeamLaser_Fixed_Huge 128049431 Beam Laser | 129046189 Overloaded Beam Laser
+Hpt_Cannon_Fixed_Huge 128049441 Cannon | 129046187 Force Impact Cannon
+Hpt_CausticMissile_Fixed_Medium 128833995 Enzyme Missile Rack | 129045429 High-Yield Enzyme Missile Rack
+Hpt_Mining_AbrBlstr_Fixed_Small 128915458 Abrasion Blaster | 129045428 Far-Reaching Abrasion Blaster
+Hpt_MiningLaser_Fixed_Small 128049525 Mining Laser | 129045432 Long Range Mining Laser
+Hpt_MultiCannon_Fixed_Medium 128049456 Multi-Cannon | 129045433 Rapid Phase Multi-Cannon
+Hpt_PulseLaserBurst_Gimbal_Medium 128049405 Burst Laser | 129046188 Regenerative Burst Laser
+Hpt_Railgun_Fixed_Medium 128049489 Rail Gun | 129044375 Enduring Feedback Rail Gun
+Hpt_Slugshot_Gimbal_Large 128671321 Fragment Cannon | 129045430 Double Screaming Fragment Cannon
+Hpt_Slugshot_Gimbal_Small 128049451 Fragment Cannon | 129045431 Double Screaming Fragment Cannon
+Int_CargoRack_Size5_Class1 128064342 Cargo Rack | 129045443 Extended Cargo Rack
+Int_CargoRack_Size6_Class1 128064343 Cargo Rack | 129045444 Extended Cargo Rack
+Int_DetailedSurfaceScanner_Tiny 128666634 Detailed Surface Scanner | 129045445 Long Range Detailed Surface Scanner
+Int_ModuleReinforcement_Size5_Class2 128737279 Module Reinforcement Package | 129044377 Heavy Duty Module Reinforcement Package
+Int_PowerDistributor_Size3_Class2 128064189 Power Distributor | 129045438 Support Focused Power Distributor
+Int_PowerDistributor_Size3_Class5 128064192 Power Distributor | 129045439 Support Focused Power Distributor
+Int_PowerDistributor_Size4_Class2 128064194 Power Distributor | 129045440 Support Focused Power Distributor
+Int_PowerDistributor_Size4_Class5 128064197 Power Distributor | 129045441 Support Focused Power Distributor
+Int_PowerDistributor_Size5_Class5 128064202 Power Distributor | 129044376 Balanced Power Distributor
+Int_PowerDistributor_Size6_Class5 128064207 Power Distributor | 129045442 Support Focused Power Distributor

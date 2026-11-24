@@ -6,6 +6,7 @@ import (
 	"encoding/gob"
 	"errors"
 	"github.com/Jakoczig/eridion/go/internal/activitystate"
+	"github.com/Jakoczig/eridion/go/internal/catalog"
 	"github.com/Jakoczig/eridion/go/internal/explorestate"
 	"github.com/Jakoczig/eridion/go/internal/history"
 	"github.com/Jakoczig/eridion/go/internal/journal"
@@ -17,7 +18,10 @@ import (
 	"time"
 )
 
-const reducerFormat = shipstate.CacheFormat + paritystate.CacheFormat + activitystate.CacheFormat + navstate.CacheFormat + navcontext.CacheFormat + explorestate.CacheFormat
+// The catalogue digest changes whenever bundled catalogue data or review
+// decisions change, so cached projections are rebuilt with the new module
+// identities (Task 16; G3I review F6).
+var reducerFormat = shipstate.CacheFormat + paritystate.CacheFormat + activitystate.CacheFormat + navstate.CacheFormat + navcontext.CacheFormat + explorestate.CacheFormat + "catalog-" + catalog.DataDigest()
 
 type cacheCommander struct{ System, SystemAddress, MarketID string }
 type reducerCache struct {

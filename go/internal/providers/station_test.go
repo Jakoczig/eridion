@@ -242,3 +242,49 @@ func TestAuditStationInventoryComplete(t *testing.T) {
 		}
 	}
 }
+
+// Task 16 (G3I): with the refreshed catalogue, current ordinary station
+// inventories that include newer modules and hulls become publishable, while
+// unverified entitlements, ambiguous shared symbols and unknown items keep the
+// snapshot suppressed with an accurate reason, and personal unlocks stay out.
+func TestAuditStationNewInventory(t *testing.T) {
+	m := &Manager{uploader: "fixture", gameVersion: "4.1", gameBuild: "fixture"}
+	head := `{"timestamp":"2026-11-24T12:00:00Z","StarSystem":"Fixture","StationName":"Fixture Port","MarketID":18446744073709551615,`
+	payload := func(kind, items string) (string, error) {
+		out, err := m.stationPayload(kind, object([]byte(head+items+`}`)))
+		return string(out), err
+	}
+	// Publishable: reviewed SCO drive, a standard module by exact ID, Python Mk II
+	// armour (reviewed ordinary entitlement), a standard module; a tech-broker
+	// unlock (Enzyme Missile Rack) is omitted.
+	out, err := payload("Outfitting", `"Items":[{"id":129030592,"Name":"int_hyperdrive_overcharge_size5_class5"},{"id":128049431,"Name":"hpt_beamlaser_fixed_huge"},{"id":129030466,"Name":"python_nx_armour_grade1"},{"id":128049513,"Name":"hpt_chafflauncher_tiny"},{"id":128833995,"Name":"hpt_causticmissile_fixed_medium"}]`)
+	if err != nil {
+		t.Fatal("new ordinary outfitting suppressed:", err)
+	}
+	for _, want := range []string{"Int_Hyperdrive_Overcharge_Size5_Class5", "Hpt_BeamLaser_Fixed_Huge", "Python_NX_Armour_Grade1", "Hpt_ChaffLauncher_Tiny", "18446744073709551615"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %s in %s", want, out)
+		}
+	}
+	if strings.Count(out, "Hpt_BeamLaser_Fixed_Huge") != 1 || strings.Contains(strings.ToLower(out), "causticmissile") {
+		t.Fatalf("variant not de-duplicated or unlock published: %s", out)
+	}
+	if out, err = payload("Shipyard", `"PriceList":[{"id":129030464,"ShipType":"python_nx"},{"ShipType":"SideWinder"},{"id":128049291,"ShipType":"dolphin"}]`); err != nil || !strings.Contains(out, `"Python_NX"`) {
+		t.Fatalf("new ordinary shipyard: %v %s", err, out)
+	}
+	// Suppressed with accurate reasons.
+	for _, tc := range []struct{ kind, items, reason string }{
+		{"Shipyard", `"PriceList":[{"ShipType":"SideWinder"},{"id":129030534,"ShipType":"type8"}]`, "availability not verified for ELITE_V_TYPE8"},
+		{"Outfitting", `"Items":[{"id":128049513,"Name":"hpt_chafflauncher_tiny"},{"id":129030535,"Name":"type8_armour_grade1"}]`, "ELITE_V_TYPE8"},
+		{"Outfitting", `"Items":[{"id":128049513,"Name":"hpt_chafflauncher_tiny"},{"Name":"hpt_causticmissile_fixed_medium"}]`, "shared symbol and no numeric ID"},
+		{"Outfitting", `"Items":[{"id":128049513,"Name":"hpt_chafflauncher_tiny"},{"id":129999999,"Name":"hpt_future_weapon_fixed_small"}]`, "not classified by the bundled catalogue"},
+		// G3I review F4: a pre-engineered variant added by the refresh with a
+		// blank entitlement is not evidence of public stock.
+		{"Outfitting", `"Items":[{"id":128049431,"Name":"hpt_beamlaser_fixed_huge"},{"id":129046189,"Name":"hpt_beamlaser_fixed_huge"}]`, "availability not verified for unreviewed item 129046189"},
+		{"Outfitting", `"Items":[{"id":128049513,"Name":"hpt_chafflauncher_tiny"},{"id":129041074,"Name":"int_mkiiagileboost_engine_size5_class5"}]`, "unreviewed item 129041074"},
+	} {
+		if out, err := payload(tc.kind, tc.items); err == nil || !strings.Contains(err.Error(), tc.reason) {
+			t.Fatalf("%s %s: published or wrong reason (%v): %s", tc.kind, tc.items, err, out)
+		}
+	}
+}
