@@ -8,6 +8,7 @@ ERIDION bundles reviewed copies of upstream community data. Nothing is downloade
 | --- | --- | --- | --- |
 | `edcd-fdevids` | `EDCD/FDevIDs` CSVs (shipyard, outfitting, commodity, material, microresources) | `go/internal/catalog/*.csv` and byte-identical copies in `resources/data/edcd/fdevids/` | No license file at the pinned revision. These are community-collected Frontier identifiers, used as factual reference data with EDCD attribution kept (see `go/internal/catalog/PROVENANCE.md`). |
 | `edcd-eddn-schemas` | `EDCD/EDDN` `schemas/*.json` | `go/internal/providers/schemas/` with the upstream `LICENSE` | BSD-3-Clause; licence file bundled. |
+| `silarn-bioscan`, `silarn-explodata` | EDMC-BioScan rule modules, regions, nebula sectors; ExploData `genus.py` | vendored under `go/internal/fieldops/upstream/` (with each LICENSE.txt); `bio-rules.json` and `predicate-support.json` generated from them by `go run ./cmd/bioscan-rules` | GPL-2.0-or-later, GPL-3.0 selected; see docs/testing/bioscan-conformance.md. |
 | `coriolis-modules` | Coriolis data (derived stock statistics) | `go/internal/catalog/modules.json` | Unpinned: the inherited derivation never recorded its revision. Game data belongs to Frontier; Coriolis code is MIT. Stock statistics only. ERIDION does not claim Coriolis or EDSY parity. |
 
 ## Statuses
@@ -59,6 +60,7 @@ The "Go tests" step (`go test ./...`, Linux and Windows) runs:
 - `TestUpstreamLockConformance` (`go/internal/catalog`): checks that the lock is well formed, with each current source pinned and appearing once. Every bundled copy, both catalogue and resources copies, must match the locked hash (generated-data consistency). Each of the five CSVs must still have the header columns the catalogue parses (schema drift), with no duplicate or empty IDs. The set of shared symbols must equal `collisions-reviewed.txt`.
 - `TestAuditModuleIdentityCollisions` and `TestAuditNewHullLabels`: numeric-ID-first resolution, ambiguous shared symbols, and labels for the newer hulls.
 - `TestAuditNewIDsNeedReview` and `TestInventoryIDReviewIsWellFormed`: the per-ID review rules.
+- `TestBioRulesGeneratedFromPinnedSources` (`go/internal/fieldops`): the BioScan rules and predicate manifest equal the converter's output from the vendored files.
 - `go/cmd/upstream-sources` tests: verify, check statuses (via a fake transport, with no network), CSV diff, the fetch and refresh guards.
 
 Cached game-state projections include `catalog.DataDigest()` (a hash of every embedded catalogue and review file), so any data or review change rebuilds them.
