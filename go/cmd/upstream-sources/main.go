@@ -240,7 +240,7 @@ func advertisedHead(body []byte) string {
 // time. It never writes inside the repository's bundled paths.
 func Fetch(s Source, revision, out string, client *http.Client) error {
 	m := githubRepo.FindStringSubmatch(s.Repository)
-	if m == nil || !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(revision) {
+	if m == nil || !fullRevision.MatchString(revision) {
 		return errors.New("fetch needs a GitHub repository and a 40-character revision")
 	}
 	if err := os.MkdirAll(out, 0o755); err != nil {
@@ -415,24 +415,56 @@ func Collisions(rows []map[string]string) []string {
 
 // Refresh copies verified candidate files into every bundled path and records
 // the new revision and hashes in the lock. It touches only the locked files.
+// manualFiles are reviewed local corrections and records. Refresh never
+// writes them, whatever the lock says.
+var manualFiles = map[string]bool{"entitlement-review.csv": true, "collisions-reviewed.txt": true, "PROVENANCE.md": true}
+
+var fullRevision = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
+func refreshTarget(root, bundled string) (string, error) {
+	clean := filepath.ToSlash(filepath.Clean(bundled))
+	if filepath.IsAbs(bundled) || clean == ".." || strings.HasPrefix(clean, "../") {
+		return "", fmt.Errorf("%s: bundled path outside the repository", bundled)
+	}
+	if manualFiles[filepath.Base(clean)] {
+		return "", fmt.Errorf("%s: manual correction file; refresh never overwrites it", bundled)
+	}
+	return filepath.Join(root, filepath.FromSlash(clean)), nil
+}
+
 func Refresh(l *Lock, id, root, dir, revision string) error {
+	if !fullRevision.MatchString(revision) {
+		return errors.New("refresh needs the immutable 40-character revision the files were fetched at")
+	}
 	for si := range l.Sources {
 		s := &l.Sources[si]
 		if s.ID != id {
 			continue
 		}
-		for fi := range s.Files {
-			f := &s.Files[fi]
+		// Validate every target and read every candidate before writing
+		// anything, so a refused refresh leaves the tree untouched.
+		data := make([][]byte, len(s.Files))
+		for fi, f := range s.Files {
 			raw, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(f.Path)))
 			if err != nil {
 				return err
 			}
 			for _, b := range f.Bundled {
-				if err := os.WriteFile(filepath.Join(root, b), raw, 0o644); err != nil {
+				if _, err := refreshTarget(root, b); err != nil {
 					return err
 				}
 			}
-			f.SHA256 = digest(raw)
+			data[fi] = raw
+		}
+		for fi := range s.Files {
+			f := &s.Files[fi]
+			for _, b := range f.Bundled {
+				dst, _ := refreshTarget(root, b)
+				if err := os.WriteFile(dst, data[fi], 0o644); err != nil {
+					return err
+				}
+			}
+			f.SHA256 = digest(data[fi])
 		}
 		s.Revision, s.ObservedHead = revision, revision
 		s.CheckedAt = time.Now().UTC().Format("2006-01-02")
