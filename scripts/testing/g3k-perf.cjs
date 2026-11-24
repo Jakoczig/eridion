@@ -9,6 +9,7 @@
 // node scripts/testing/g3k-perf.cjs --host BIN --fixture DIR --case NAME --out FILE
 //   [--playwright DIR] [--chromium BIN] [--low-latency] [--rep N]
 'use strict'
+/* global WebSocket, location */
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -62,7 +63,10 @@ async function startHost (fixture) {
   const pid = Number((await expect(/^PERF_HOST_PID=/)).split('=')[1])
   const command = async (cmd, re) => { child.stdin.write(cmd + '\n'); return expect(re) }
   return {
-    url, pid, journal, profile,
+    url,
+    pid,
+    journal,
+    profile,
     async stats () { return JSON.parse((await command('stats', /^PERF_STATS /)).slice('PERF_STATS '.length)) },
     async reset () { await command('reset', /^PERF_RESET/) },
     async stop () { child.stdin.write('quit\n'); await new Promise(resolve => { child.once('exit', resolve); setTimeout(() => { child.kill(); resolve() }, 15000) }); for (const d of [profile, journal]) fs.rmSync(d, { recursive: true, force: true }) }
@@ -129,8 +133,17 @@ async function main () {
     await waitText(warm, 'Perf Fixture', 120000)
     await warm.close()
     if (args['low-latency']) {
-      const r = await main.request.post(host.url + '/owner/companion', { headers: { Origin: host.url, 'X-Eridion-Scope': 'launcher' }, data: { lowLatency: true } })
-      result.lowLatencyApplied = r.ok()
+      // The launcher-only setting, saved exactly as the launcher does.
+      const launcher = await main.newPage()
+      await launcher.goto(host.url + '/launcher')
+      result.lowLatencyApplied = await launcher.evaluate(() => new Promise((resolve, reject) => {
+        const ws = new WebSocket(location.origin.replace('http', 'ws') + '/?scope=launcher')
+        const call = (name, message) => new Promise(resolve => { const id = name + Math.random(); const on = e => { const m = JSON.parse(e.data); if (m.requestId === id) { ws.removeEventListener('message', on); resolve(m) } }; ws.addEventListener('message', on); ws.send(JSON.stringify({ requestId: id, name, message })) })
+        ws.onopen = async () => { const cur = await call('getGoLauncher', {}); const saved = await call('setGoCompanion', { ...cur.message.config, lowLatency: true }); ws.close(); resolve(!saved.error && saved.message?.config?.lowLatency === true) }
+        ws.onerror = () => reject(new Error('launcher socket'))
+      }))
+      await launcher.close()
+      if (!result.lowLatencyApplied) throw new Error('low latency setting not applied')
     }
     const pair = async (page) => {
       const ctx = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1024, height: 768 } })
@@ -154,7 +167,7 @@ async function main () {
         await delay(30000)
         const f0 = v.counter.frames; const b0 = v.counter.bytes
         await host.reset()
-        result.window = await measureWindow(host, browserPid, Number(args.seconds || 300))
+        result.window = await measureWindow(host, browserPid, Number(args.seconds || (args.case === 'dashboard-hidden' ? 120 : 300)))
         result.socket = { frames: v.counter.frames - f0, bytes: v.counter.bytes - b0 }
         break
       }

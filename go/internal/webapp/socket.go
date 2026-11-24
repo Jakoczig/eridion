@@ -205,7 +205,10 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 					}
 					// Audit F8: an EDSM consent change made in the launcher
 					// reaches every open community consumer at once.
-					if base := communityBase.Load(); base != 0 && s.community != nil && want(topicCommunity, true) {
+					// Consent invalidation is privacy-relevant: it reaches
+					// every consumer at once, hidden or not, so revoked data
+					// is never shown when a hidden display returns.
+					if base := communityBase.Load(); base != 0 && s.community != nil {
 						revision, enabled := s.community.Revision()
 						if revision+1 != base {
 							communityBase.Store(revision + 1)
