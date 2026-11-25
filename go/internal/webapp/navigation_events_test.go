@@ -271,3 +271,19 @@ func TestG3LModeDeadlineTimerDelivers(t *testing.T) {
 		t.Fatalf("deadline delivery off by %v", late)
 	}
 }
+
+// Measured in G3L perf: an explicit getGoNavigationContext reply was followed
+// by a push of the same value (~7 KB per display open). The reply counts as
+// delivered; only a later change is pushed.
+func TestG3LExplicitReadIsNotRepushed(t *testing.T) {
+	s, dir, _, _ := liveFixture(t)
+	f := collect(t, dialScoped(t, s, ""))
+	f.rpc(t, "getGoNavigationContext", nil)
+	if n := contextPushes(f, 400*time.Millisecond); n != 0 {
+		t.Fatalf("explicit read re-pushed %d times", n)
+	}
+	writeStatus(t, dir, time.Now(), 0x01000000, 1<<19, 20)
+	if p := nextContext(t, f, 900*time.Millisecond); p.Navigation.Mode != "charge" {
+		t.Fatalf("%+v", p.Navigation)
+	}
+}

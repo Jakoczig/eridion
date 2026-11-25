@@ -175,6 +175,10 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 		}
 	}()
 	contextResync := make(chan struct{}, 1)
+	// The context this connection last received, by push or by an explicit
+	// getGoNavigationContext reply; the push loop never resends it.
+	var contextMu sync.Mutex
+	var contextSent any
 	if s.game != nil && s.g2e {
 		go func() {
 			ticker := time.NewTicker(time.Second)
@@ -238,7 +242,6 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 		// differs from what this connection last received, and nothing while
 		// the display is hidden; a resumed display gets the current state.
 		go func() {
-			var previous any
 			timer := time.NewTimer(time.Hour)
 			timer.Stop()
 			defer timer.Stop()
@@ -250,8 +253,13 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 				requested := contextRequested.Load()
 				if (!d.declared && requested) || (d.declared && d.allows(topicContext) && requested) {
 					v, until := s.contextView(principal)
-					if !reflect.DeepEqual(previous, v) {
-						previous = v
+					contextMu.Lock()
+					fresh := !reflect.DeepEqual(contextSent, v)
+					if fresh {
+						contextSent = v
+					}
+					contextMu.Unlock()
+					if fresh {
 						perfstats.Add("context.push", 1)
 						if send(map[string]any{"name": "goNavigationContextChanged", "message": v}) != nil {
 							return
@@ -575,7 +583,11 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 				response["error"] = "Navigation context unavailable"
 			} else {
 				contextRequested.Store(true)
-				response["message"] = s.freshContextView(principal)
+				v := s.freshContextView(principal)
+				contextMu.Lock()
+				contextSent = v
+				contextMu.Unlock()
+				response["message"] = v
 				select {
 				case contextResync <- struct{}{}:
 				default:
