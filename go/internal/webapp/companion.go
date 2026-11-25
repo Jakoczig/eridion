@@ -30,6 +30,22 @@ type companionState struct {
 	notice   string
 	action   func(string) error
 	setClose func(string)
+	// policyChanged is closed (and replaced) when the display policy changes,
+	// so navigation-context delivery reacts without sampling (G3L).
+	policyChanged chan struct{}
+}
+
+// policySignal returns a channel closed at the next display-policy change.
+func (s *Server) policySignal() <-chan struct{} {
+	if s.companion == nil {
+		return nil
+	}
+	s.companion.mu.Lock()
+	defer s.companion.mu.Unlock()
+	if s.companion.policyChanged == nil {
+		s.companion.policyChanged = make(chan struct{})
+	}
+	return s.companion.policyChanged
 }
 
 func (s *Server) initCompanion(opts Options) {
@@ -88,6 +104,10 @@ func (s *Server) saveDisplayConfig(raw []byte) error {
 	}
 	s.companion.config = c
 	s.companion.notice = ""
+	if s.companion.policyChanged != nil {
+		close(s.companion.policyChanged)
+		s.companion.policyChanged = nil
+	}
 	if s.companion.setClose != nil {
 		s.companion.setClose(c.CloseMode)
 	}

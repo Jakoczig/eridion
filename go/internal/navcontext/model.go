@@ -36,6 +36,10 @@ type View struct {
 	Fresh   bool    `json:"fresh"`
 	ModeAt  string  `json:"modeAt"`
 }
+
+// modeWindow bounds how long a charge/jump mode is shown without new evidence.
+const modeWindow = 60 * time.Second
+
 type state struct {
 	verified, arrived               bool
 	session, last, modeAt, statusAt time.Time
@@ -195,15 +199,28 @@ func (m *Model) mode(s *state, mode string, at time.Time) {
 	s.mode = mode
 	s.modeAt = at
 }
-func (m *Model) Status(key string, v paritystate.StatusView) {
+
+// Status applies a Status.json observation and reports whether the visible
+// flight mode changed (G3L: navigation context is published on change).
+func (m *Model) Status(key string, v paritystate.StatusView) (changed bool) {
 	s := m.states[key]
 	if s == nil || !s.verified || !s.arrived || v.State != "known" || v.Flags == nil || !v.Flags.InMainShip {
-		return
+		return false
 	}
 	at, err := time.Parse(time.RFC3339Nano, v.ObservedAt)
 	if err != nil || !at.After(s.session) || at.Before(s.modeAt) || at.Before(s.statusAt) {
-		return
+		return false
 	}
+	// A continuing mode only extends its window (modeAt); the view is
+	// unchanged and the extension is picked up at the previous deadline.
+	// A mode whose window had already expired at this observation was not
+	// visible; showing it again is a change even with the same episode
+	// (review #5).
+	mode, episode := s.mode, s.episode
+	wasVisible := s.mode != "" && at.Sub(s.modeAt) < modeWindow
+	defer func() {
+		changed = mode != s.mode || episode != s.episode || (!wasVisible && s.mode != "")
+	}()
 	s.statusAt = at
 	// Prefer the modern hyperdrive flag; old Status writers only expose FSDCharging.
 	charging := v.Flags2 != nil && v.Flags2.FSDHyperdriveCharging || v.Flags2 == nil && v.Flags.FSDCharging
@@ -215,6 +232,24 @@ func (m *Model) Status(key string, v paritystate.StatusView) {
 		s.mode = ""
 		s.episode = ""
 	}
+	return
+}
+
+// Deadline is the next instant at which View(key, ·) changes by time alone
+// (the flight mode window opens at modeAt and closes 60 s later); zero when
+// the view is time-independent. Callers schedule only this, never sampling.
+func (m *Model) Deadline(key string, now time.Time) time.Time {
+	s := m.states[key]
+	if s == nil || !s.verified || !s.arrived || s.mode == "" {
+		return time.Time{}
+	}
+	if now.Before(s.modeAt) {
+		return s.modeAt
+	}
+	if end := s.modeAt.Add(modeWindow); now.Before(end) {
+		return end
+	}
+	return time.Time{}
 }
 func clone(p Point) Point {
 	p.Powers = append([]string(nil), p.Powers...)
@@ -241,7 +276,7 @@ func (m *Model) View(key string, now time.Time) View {
 		p := clone(*s.current)
 		v.Current = &p
 	}
-	if s.mode != "" && now.Sub(s.modeAt) >= 0 && now.Sub(s.modeAt) < 60*time.Second {
+	if s.mode != "" && now.Sub(s.modeAt) >= 0 && now.Sub(s.modeAt) < modeWindow {
 		v.Mode = s.mode
 		v.Episode = s.episode
 		v.ModeAt = strings.SplitN(s.episode, "/", 2)[1]

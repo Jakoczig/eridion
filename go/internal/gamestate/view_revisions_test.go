@@ -87,7 +87,15 @@ func TestPerfDomainRevisionDemand(t *testing.T) {
 	// A source/account change republishes every domain.
 	before = revisionsOf(s)
 	appendEvent(t, dir, `{"event":"Shutdown","timestamp":"2026-11-24T10:00:06Z"}`)
-	r = waitRev(t, s, func(r Revisions) bool { return r.Navigation > before.Navigation })
+	// The Shutdown event publishes its changed domains at once. The source
+	// state change (waiting_game) follows on the next service tick, and that
+	// one republishes every domain, including the unchanged Ship. Wait for
+	// it rather than the first publish (G3L: the Windows runner read in
+	// between). A domain that is never republished still fails here.
+	waitState(t, s, func(v Summary) bool { return v.SourceState != "live" })
+	r = waitRev(t, s, func(r Revisions) bool {
+		return r.Navigation > before.Navigation && r.Exploration > before.Exploration && r.Ship > before.Ship && r.Workspace > before.Workspace
+	})
 	if r.Exploration == before.Exploration || r.Ship == before.Ship || r.Workspace == before.Workspace {
 		t.Fatalf("a source state change did not republish every domain: %+v -> %+v", before, r)
 	}

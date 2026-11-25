@@ -95,6 +95,8 @@ type Service struct {
 	cachedProjection    *Projections
 	cachedProjectionFID string
 	navigationContext   *navcontext.Model
+	navSignal           navContextSignal
+	reorderPending      bool // a chronological rebuild after a discovery backlog is pending
 	mu                  perfstats.Mutex
 	views               projectionState
 	opts                Options
@@ -395,7 +397,28 @@ func (s *Service) Run(ctx context.Context) error {
 				if s.store != nil {
 					durable = s
 				}
-				reader, _ = journal.NewReader(directory, journal.ReaderOptions{PollInterval: opts.PollInterval, Durable: durable})
+				// Task 9: when a large backlog committed history behind the
+				// active journal, rebuild derived state chronologically from
+				// durable history (the existing maintenance path stops and
+				// restarts the reader). Asynchronous: the reader calls this.
+				reordered := func() {
+					if s.store == nil {
+						return
+					}
+					// Marked synchronously, before the reader reports an empty
+					// backlog, so the out-of-order state is never presented
+					// as a finished import while the rebuild is pending.
+					s.mu.Lock()
+					s.reorderPending = true
+					s.mu.Unlock()
+					go func() {
+						_ = s.RebuildDerived(ctx, "")
+						s.mu.Lock()
+						s.reorderPending = false
+						s.mu.Unlock()
+					}()
+				}
+				reader, _ = journal.NewReader(directory, journal.ReaderOptions{PollInterval: opts.PollInterval, Durable: durable, HistoryReordered: reordered})
 				snapshots, _ = sidecar.NewReader(directory, sidecar.Options{StationData: s.store != nil})
 				if reader != nil {
 					readerCtx, cancel := context.WithCancel(ctx)
@@ -506,7 +529,13 @@ func (s *Service) Run(ctx context.Context) error {
 				stats := reader.Stats()
 				s.details.ReaderBytes = stats.BytesRead
 				s.summary.SourceState = stats.SourceState
-				s.summary.ImportInProgress = stats.ImportInProgress
+				// A draining discovery backlog is still an import (review #1):
+				// older batches are applied after the newest journals, so the
+				// derived state is not chronological until the backlog drains
+				// and the single rebuild runs. Ingestion and durable commits
+				// continue; displays show catching-up instead of a live state
+				// built from older journals.
+				s.summary.ImportInProgress = stats.ImportInProgress || stats.Backlog > 0 || s.reorderPending
 				if stats.SourceState == "live" || stats.SourceState == "replaying" {
 					if stats.Pending {
 						s.summary.SourceState = "partial"
@@ -525,7 +554,8 @@ func (s *Service) Run(ctx context.Context) error {
 			} else {
 				s.summary.ImportInProgress = false
 			}
-			if !s.summary.ImportInProgress {
+			backlog := reader != nil && reader.Stats().Backlog > 0
+			if !s.summary.ImportInProgress && !backlog {
 				// History is complete: check the stored default against the
 				// verified commanders, then adopt one only if exactly one
 				// verified commander exists, never by import order.
@@ -533,7 +563,7 @@ func (s *Service) Run(ctx context.Context) error {
 				s.adoptDefaultLocked()
 			}
 			if s.store != nil && s.databaseError == "" {
-				if s.summary.ImportInProgress {
+				if s.summary.ImportInProgress || backlog {
 					if s.restored {
 						s.summary.Stage = "CATCHING_UP"
 					} else {

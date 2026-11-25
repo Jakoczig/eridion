@@ -65,7 +65,7 @@ func g2eFixture(t *testing.T) (*Server, *http.Client, *http.Client, string, stri
 		}
 	}
 	s, o, v, u, d := startGameFixture(t, dir, true, "Fixture Alpha", true, true, true)
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(fixtureReadyTimeout)
 	replay, err := os.ReadFile(filepath.Join(dir, "Journal.20260101.01.log"))
 	if err != nil {
 		t.Fatal(err)

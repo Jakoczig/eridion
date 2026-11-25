@@ -118,6 +118,7 @@ func (s *Service) restoreCacheLocked(raw []byte) error {
 	c.Exploration.RestoreLinks()
 	s.views.exploration = c.Exploration
 	s.navigationContext = c.Context
+	s.navSignal.gen++
 	s.views.dirty = true
 	return nil
 }

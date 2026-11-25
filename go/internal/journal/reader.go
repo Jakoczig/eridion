@@ -29,13 +29,41 @@ type ReaderOptions struct {
 	Durable        Durable
 	PollInterval   time.Duration
 	MaxRecordBytes int
+	// HistoryReordered is called once when a backlog finished after older
+	// journals committed new records behind the active one (Task 9): the
+	// caller rebuilds derived state chronologically from durable history.
+	HistoryReordered func()
 }
+
+// Bounded discovery (Task 9 / F11). Directories up to fullScanLimit journals
+// are read completely on every poll, as before. Larger ones are read in
+// bounded batches: the two newest journals (active and just rolled over)
+// first, then up to defaultBacklogBatch unread journals in chronological
+// order, then a round-robin slice of settled journals to detect changes.
+var (
+	maxDirectoryEntries = 65536
+	fullScanLimit       = 512
+	defaultBacklogBatch = 256
+)
+
+// SetDiscoveryLimitsForTest lowers the full-scan limit and batch size so a
+// service-level test can exercise backlog mode with a few dozen journals
+// instead of hundreds of durable commits. Tests only: call before starting a
+// reader and restore with the returned function after it stopped.
+func SetDiscoveryLimitsForTest(fullScan, batch int) (restore func()) {
+	oldFull, oldBatch := fullScanLimit, defaultBacklogBatch
+	fullScanLimit, defaultBacklogBatch = fullScan, batch
+	return func() { fullScanLimit, defaultBacklogBatch = oldFull, oldBatch }
+}
+
 type ReaderStats struct {
 	SourceState                                   string
 	LastError                                     string
 	Files                                         int
 	EventsRead, MalformedLines, BytesRead, Resets uint64
 	Pending, ImportInProgress                     bool
+	// Backlog counts journals not yet read in this run (bounded discovery).
+	Backlog int
 }
 type cursor struct {
 	info                os.FileInfo
@@ -55,7 +83,13 @@ type Reader struct {
 	serial      uint64
 	started     bool
 	startedAt   time.Time
-	running     atomic.Bool
+	roundRobin  int
+	reordered   bool
+	// unreadable holds journals whose open failed this run (permission,
+	// exclusive lock): they are retried by the round-robin, not counted as
+	// backlog, so one locked file cannot hold import open forever (review #2).
+	unreadable map[string]bool
+	running    atomic.Bool
 }
 
 func NewReader(dir string, opts ReaderOptions) (*Reader, error) {
@@ -124,14 +158,17 @@ func (r *Reader) poll(ctx context.Context, emit func(Event, Phase) error) error 
 		r.sourceError(err)
 		return nil
 	}
-	entries, err := f.ReadDir(4097)
+	entries, err := f.ReadDir(maxDirectoryEntries + 1)
 	f.Close()
 	if err != nil && !errors.Is(err, io.EOF) {
 		r.sourceError(err)
 		return nil
 	}
-	if len(entries) > 4096 {
-		r.change(func(s *ReaderStats) { s.SourceState = "source_error"; s.LastError = "journal file count exceeds limit" })
+	if len(entries) > maxDirectoryEntries {
+		r.change(func(s *ReaderStats) {
+			s.SourceState = "source_error"
+			s.LastError = "journal directory exceeds " + strconv.Itoa(maxDirectoryEntries) + " entries"
+		})
 		return nil
 	}
 	var names []string
@@ -159,20 +196,93 @@ func (r *Reader) poll(ctx context.Context, emit func(Event, Phase) error) error 
 	}
 	current := map[string]bool{}
 	for _, name := range names {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
 		current[name] = true
-		if err := r.readFile(ctx, name, emit); err != nil {
-			return err
-		}
 	}
 	for name := range r.cursors {
 		if !current[name] {
 			delete(r.cursors, name)
 		}
 	}
+	for name := range r.unreadable {
+		if !current[name] {
+			delete(r.unreadable, name)
+		}
+	}
+	work, backlogMode := r.plan(names)
+	for _, name := range work {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		older := backlogMode && journalLess(name, names[max(0, len(names)-2)]) // behind the hot journals
+		before := r.Stats().EventsRead                                         // counts emitted and durably committed records
+		if err := r.readFile(ctx, name, emit); err != nil {
+			return err
+		}
+		if older && r.Stats().EventsRead > before {
+			r.reordered = true // history committed behind the active journal
+		}
+		if r.cursors[name] == nil {
+			if r.unreadable == nil {
+				r.unreadable = map[string]bool{}
+			}
+			r.unreadable[name] = true
+		} else {
+			delete(r.unreadable, name)
+		}
+	}
+	backlog := 0
+	for _, name := range names {
+		if r.cursors[name] == nil && !r.unreadable[name] {
+			backlog++
+		}
+	}
+	// The reorder callback runs before the empty backlog is published, so a
+	// caller never observes "backlog drained" without the pending rebuild.
+	if backlog == 0 && r.reordered {
+		r.reordered = false
+		if r.opts.HistoryReordered != nil {
+			r.opts.HistoryReordered()
+		}
+	}
+	r.change(func(s *ReaderStats) { s.Backlog = backlog })
 	return nil
+}
+
+// plan chooses this poll's journals (chronological names). Small directories
+// are read completely; large ones in bounded batches with the newest
+// journals first so live ingestion and rollover never wait for history.
+func (r *Reader) plan(names []string) ([]string, bool) {
+	if len(names) <= fullScanLimit {
+		return names, false
+	}
+	hot := names[max(0, len(names)-2):]
+	work := append([]string(nil), hot...)
+	inWork := map[string]bool{}
+	for _, n := range hot {
+		inWork[n] = true
+	}
+	unread := 0
+	for _, n := range names {
+		if unread >= defaultBacklogBatch {
+			break
+		}
+		if r.cursors[n] == nil && !r.unreadable[n] && !inWork[n] {
+			work = append(work, n)
+			inWork[n] = true
+			unread++
+		}
+	}
+	// Round-robin over settled journals: changes to old journals are still
+	// detected, within len(names)/defaultBacklogBatch polls.
+	for k := 0; k < defaultBacklogBatch && k < len(names); k++ {
+		n := names[(r.roundRobin+k)%len(names)]
+		if !inWork[n] && (r.cursors[n] != nil || r.unreadable[n]) {
+			work = append(work, n)
+			inWork[n] = true
+		}
+	}
+	r.roundRobin = (r.roundRobin + defaultBacklogBatch) % len(names)
+	return work, unread > 0
 }
 func (r *Reader) sourceError(err error) {
 	r.change(func(s *ReaderStats) {

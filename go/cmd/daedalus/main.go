@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Jakoczig/eridion/go/internal/buildinfo"
 	"github.com/Jakoczig/eridion/go/internal/desktop"
 	"github.com/Jakoczig/eridion/go/internal/frontend"
 	"github.com/Jakoczig/eridion/go/internal/webapp"
@@ -42,8 +43,18 @@ func run(ctx context.Context, args []string, assets fs.FS, launch launcher, out 
 	ownerReadOnly := flags.Bool("owner-read-only", false, "Authorize a single read with this OS owner's existing Frontier consent")
 	dataDir := flags.String("data-dir", "", "private Go profile directory (legacy profile is never used)")
 	journalDir := flags.String("journal-dir", "", "local owner journal directory override")
+	buildInfo := flags.Bool("build-info", false, "print the embedded build identity and exit; opens no window, profile or network")
 	if flags.Parse(args) != nil || flags.NArg() != 0 {
-		return errors.New("usage: eridion [--smoke-test | --desktop-smoke-test]")
+		return errors.New("usage: eridion [--smoke-test | --desktop-smoke-test | --build-info]")
+	}
+	// G3L Task 10: identity only. It must be the sole argument and runs before
+	// anything that could touch a profile, start a service or open a window.
+	if *buildInfo {
+		if len(args) != 1 {
+			return errors.New("--build-info cannot be combined with other options")
+		}
+		_, err := out.Write(buildinfo.JSON())
+		return err
 	}
 	if *diagnostic == "" && (*ownerReadOnly || *diagnosticOutput != "") {
 		return errors.New("Explicit --frontier-diagnostic endpoint required; no service or request started")
