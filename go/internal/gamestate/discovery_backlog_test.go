@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,7 +19,11 @@ import (
 // imports nothing twice and does not rebuild again.
 func TestAuditDiscoveryBacklogChronologicalState(t *testing.T) {
 	dir, profile := t.TempDir(), t.TempDir()
-	const files = 600 // above the reader's full-scan limit
+	// Backlog mode with few durable commits (each journal is one SQLite
+	// transaction; hundreds of them took over a minute on the Windows
+	// runner): full scan up to 16 journals, then batches of 8.
+	defer journal.SetDiscoveryLimitsForTest(16, 8)()
+	const files = 40 // above the lowered full-scan limit
 	for i := 1; i <= files; i++ {
 		lines := fmt.Sprintf(`{"timestamp":"2026-01-01T%02d:%02d:%02dZ","event":"Fileheader","part":1}`+"\n", i/3600, i/60%60, i%60)
 		lines += fmt.Sprintf(`{"timestamp":"2026-01-01T%02d:%02d:%02dZ","event":"LoadGame","FID":"SYNTHETIC-A","Commander":"Fixture","Ship":"anaconda","ShipID":7}`+"\n", i/3600, i/60%60, i%60)
@@ -38,7 +43,10 @@ func TestAuditDiscoveryBacklogChronologicalState(t *testing.T) {
 		}
 	}
 	writeAccounts(t, profile, `{"version":2,"multiple":false,"selected":"","defaultFID":"SYNTHETIC-A"}`)
-	s, _, stop := recordingService(t, profile, dir)
+	s, _, stopService := recordingService(t, profile, dir)
+	var stopOnce sync.Once
+	stop := func() { stopOnce.Do(stopService) }
+	defer func() { stop() }() // also on a failed assertion, so no service outlives the test
 	// Review #1: observe every published summary (not a sampled one). While
 	// the discovery backlog drains, the import is not finished. The G3K-era
 	// reader reported ImportInProgress=false / "live" from the first poll
@@ -102,8 +110,9 @@ func TestAuditDiscoveryBacklogChronologicalState(t *testing.T) {
 	}
 	stop()
 	// Restart: no duplicates and no new rebuild.
-	s, _, stop = recordingService(t, profile, dir)
-	defer stop()
+	s, _, stopService = recordingService(t, profile, dir)
+	stopOnce = sync.Once{}
+	stop = func() { stopOnce.Do(stopService) }
 	waitState(t, s, func(v Summary) bool { return !v.ImportInProgress })
 	time.Sleep(500 * time.Millisecond)
 	if after := count(); after != n {

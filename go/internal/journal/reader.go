@@ -46,6 +46,16 @@ var (
 	defaultBacklogBatch = 256
 )
 
+// SetDiscoveryLimitsForTest lowers the full-scan limit and batch size so a
+// service-level test can exercise backlog mode with a few dozen journals
+// instead of hundreds of durable commits. Tests only: call before starting a
+// reader and restore with the returned function after it stopped.
+func SetDiscoveryLimitsForTest(fullScan, batch int) (restore func()) {
+	oldFull, oldBatch := fullScanLimit, defaultBacklogBatch
+	fullScanLimit, defaultBacklogBatch = fullScan, batch
+	return func() { fullScanLimit, defaultBacklogBatch = oldFull, oldBatch }
+}
+
 type ReaderStats struct {
 	SourceState                                   string
 	LastError                                     string
