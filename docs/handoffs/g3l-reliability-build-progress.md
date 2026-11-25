@@ -272,11 +272,36 @@ G3D also passed earlier with 600 ms delayed context messages.
 
 ## CI and previews
 
-CI-PLACEHOLDER
+**Final source commit:** `358b91f30dfe0e5ea09f490105a3d27f0c58c051`. The draft PR is [#34](https://github.com/Jakoczig/eridion/pull/34), targeting `go/g3k-native-performance`. Both workflows triggered for this target, because the `pull_request.branches` filter now includes it.
+
+| Workflow | Run | Result |
+| --- | --- | --- |
+| ERIDION Go desktop | [45566787212](https://github.com/Jakoczig/eridion/actions/runs/45566787212) | success on `windows-latest` and `ubuntu-24.04`: all Go tests, vet, race, stress, native smokes, every browser and visual gate, identity verification and packaging |
+| CI (legacy) | [45566787280](https://github.com/Jakoczig/eridion/actions/runs/45566787280) | success |
+
+**Earlier run on `667399a`** ([45564718884](https://github.com/Jakoczig/eridion/actions/runs/45564718884)): Linux passed and Windows failed.
+- **Cause:** the 600-journal service test committed only about 8 journals per second on the Windows runner (one full-sync SQLite transaction per journal). It timed out, and because it never stopped its service, the leftover I/O starved three timing tests that ran alongside it.
+- **Fix:** `358b91f` lowers the discovery limits for that test and stops the service on every exit path. It is still red without either fix.
+- No test was skipped or weakened.
+
+**Unsigned previews** (14-day Actions artifacts from run 45566787212, downloaded and verified):
+
+| Artifact | Contents | Identity |
+| --- | --- | --- |
+| `eridion-2.2.0-g3l-358b91f30dfe-windows-amd64-experimental-unsigned-preview` | `eridion.exe`, `README.md`, `BUILD-IDENTITY.json`, `SHA256SUMS` (all OK) | `2.2.0-g3l+358b91f30dfe`, windows/amd64 |
+| `eridion-2.2.0-g3l-358b91f30dfe-linux-amd64-experimental-unsigned-preview` | `eridion`, `README.md`, `BUILD-IDENTITY.json`, `SHA256SUMS` (all OK) | `2.2.0-g3l+358b91f30dfe`, linux/amd64 |
+
+- Both manifests record `ci.pullRequestHead = builtRevision = 358b91f…`.
+- They record `syntheticMergeCommit = c33441c986cb643c7b699a07585feb2ecac87ab6` with `syntheticMergeBuilt: false`.
+- On each runner, "Verify embedded build identity" printed the executable's own report: `revision` 358b91f…, `vcs.revision` 358b91f… and `vcs.modified` false. Packaging then cross-checked it against the manifest.
+- No release, tag, signing, deployment or upload outside Actions artifacts was performed.
+
+This ledger is committed after the verified source commit. It is documentation only, and its own CI run is linked from PR #34.
 
 ## Remaining physical and real-game gaps
 
 - No real game session, and no native Windows WebView2 or Linux WebKitGTK window, were exercised here. Event-driven FSD should be checked on selected owner and viewer screens: no-route and routed charge, jump, cancel and arrival; rapid consecutive jumps; manual dismissal; hide and resume of a paired tablet.
 - No real journal folder with more than 4,096 files was used (synthetic fixtures only). A real large folder should show catching-up and then live state, with live play continuing.
+- On the Windows runner, durable import ran at about 8 journals per second (one full-sync SQLite transaction per journal). A real folder of 10,000 journals on a similar disk would take about 20 minutes to catch up. Live play continues meanwhile, and history arrives in the background. The per-journal commit cost already existed in G3K and is not a G3L regression. Batching several small journals per transaction would be a separate, evidence-gated change.
 - Restore was tested against synthetic databases. A Windows run should check cancel and retry with antivirus locking files.
 - Next milestones: Task 20 Spansh, Task 21 game controls, Task 22 LandingPad.
