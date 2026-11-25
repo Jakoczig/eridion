@@ -67,10 +67,18 @@ func parseSpatial(b []byte) (*spatialManifest, error) {
 	if len(obj) != 5 && !(len(obj) == 6 && m.RadiusLY > 0) {
 		return nil, errSpatial
 	}
+	rawRoots, ok := obj["roots"].([]any)
+	if !ok || len(rawRoots) != len(m.Roots) {
+		return nil, errSpatial
+	}
 	seen := map[[3]int64]bool{}
 	var count int64
 	for i, r := range m.Roots {
-		raw := obj["roots"].([]any)[i].(map[string]any)
+		// A null element decodes to a zero root; reject it before use (G3L).
+		raw, ok := rawRoots[i].(map[string]any)
+		if !ok {
+			return nil, errSpatial
+		}
 		cell, ok := raw["cell"].([]any)
 		if !ok || len(cell) != 3 || len(raw) != 4 {
 			return nil, errSpatial
