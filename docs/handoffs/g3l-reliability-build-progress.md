@@ -286,6 +286,16 @@ G3D also passed earlier with 600 ms delayed context messages.
 
 - **`87e7267`** (docs only, [45573019718](https://github.com/Jakoczig/eridion/actions/runs/45573019718)): Go tests passed, but the Windows G2N browser gate aborted with Chrome's "Inspected target navigated or closed". The shared gate harness's `waitFor` treated a poll that raced G2N's deliberate commander-switch redirect as a fatal error. The harness now retries only those transient navigation errors; any other error still fails, and a condition that never holds still times out (`tests/build/visual-wait.test.cjs`). The redirect is the same in G3K and G3L, so this is a harness race. G2N, G2D and G3D passed locally after the change. The CI result for that commit is recorded in PR #34.
 
+- **`4997e2f`** ([45575102679](https://github.com/Jakoczig/eridion/actions/runs/45575102679)): Windows failed in the existing `TestG2KViewerCannotOperatePlansClipboardTallyOrExports`. Its shared fixture did not replay its journal within the 3 s setup wait. The new G3L tests open many SQLite stores and live fixtures, so the Windows packages that run in parallel take longer:
+
+  | Package | G3K | G3L |
+  | --- | --- | --- |
+  | webapp | 106 s | 127–155 s |
+  | history | 57 s | 87–111 s |
+  | gamestate | 29 s | 38–43 s |
+
+  The two shared fixture builders (`startGameFixture`, `g2eFixture`) now allow 15 s to become ready. This affects setup only; no behavioural assertion changed. Intermittent Windows failures that went green on the next run are also visible on G3G, G3I and G3K.
+
 **Unsigned previews** (14-day Actions artifacts from run 45570668669, downloaded and verified):
 
 | Artifact | Contents | Identity |

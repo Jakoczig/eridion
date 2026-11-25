@@ -39,6 +39,12 @@ func gameFixture(t *testing.T) (*Server, *http.Client, *http.Client, string, str
 	writeGameEvent(t, dir, `{"event":"Location","StarSystem":"Fixture System","SystemAddress":9223372036854775807}`)
 	return startGameFixture(t, dir, false, "Fixture System")
 }
+
+// fixtureReadyTimeout bounds fixture setup (journal replay, first Status),
+// not any behavioural assertion. The Windows runner, with every package's
+// SQLite tests in parallel, sometimes needed more than 3 s (G3L CI).
+const fixtureReadyTimeout = 15 * time.Second
+
 func startGameFixture(t *testing.T, dir string, navigation bool, expected string, exploration ...bool) (*Server, *http.Client, *http.Client, string, string) {
 	t.Helper()
 	s, err := StartLocalWithOptions(context.Background(), fixtureFS(), Options{StorageDir: t.TempDir(), JournalDir: dir, EnableJournal: true, EnableNavigation: navigation, EnableExploration: len(exploration) > 0 && exploration[0], EnableDashboard: len(exploration) > 1 && exploration[1], EnableParity: len(exploration) > 2 && exploration[2], Discovery: journal.DiscoveryOptions{Roots: []string{}}, PollInterval: 5 * time.Millisecond})
@@ -63,7 +69,7 @@ func startGameFixture(t *testing.T, dir string, navigation bool, expected string
 	if result != 200 {
 		t.Fatal("pairing", result)
 	}
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(fixtureReadyTimeout)
 	for s.game.Snapshot().CurrentSystem != expected {
 		if time.Now().After(deadline) {
 			t.Fatal("journal did not replay")
