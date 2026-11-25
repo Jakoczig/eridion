@@ -16,7 +16,7 @@
 | Task 10: build identity | done | `e989ad7` |
 | Dependency and security maintenance | done (compatible updates; Next migration deferred) | `e989ad7` |
 | Independent review and fixes | done | `44b2c6e`, `65ef7bc` |
-| CI on the final source commit, previews | see [CI](#ci-and-previews) | — |
+| CI on the final source commit, previews | done (`1296beb`) | `358b91f`, `1296beb` |
 
 ## Task 9: journal discovery and recovery
 
@@ -272,31 +272,31 @@ G3D also passed earlier with 600 ms delayed context messages.
 
 ## CI and previews
 
-**Final source commit:** `358b91f30dfe0e5ea09f490105a3d27f0c58c051`. The draft PR is [#34](https://github.com/Jakoczig/eridion/pull/34), targeting `go/g3k-native-performance`. Both workflows triggered for this target, because the `pull_request.branches` filter now includes it.
+**Final verified source commit:** `1296beba41d45e1c1a5f74a89b47d3bf86237099`. The draft PR is [#34](https://github.com/Jakoczig/eridion/pull/34), targeting `go/g3k-native-performance`. Both workflows triggered for this target, because the `pull_request.branches` filter now includes it.
 
 | Workflow | Run | Result |
 | --- | --- | --- |
-| ERIDION Go desktop | [45566787212](https://github.com/Jakoczig/eridion/actions/runs/45566787212) | success on `windows-latest` and `ubuntu-24.04`: all Go tests, vet, race, stress, native smokes, every browser and visual gate, identity verification and packaging |
-| CI (legacy) | [45566787280](https://github.com/Jakoczig/eridion/actions/runs/45566787280) | success |
+| ERIDION Go desktop | [45570668669](https://github.com/Jakoczig/eridion/actions/runs/45570668669) | success on `windows-latest` and `ubuntu-24.04`: all Go tests, vet, race, stress, native smokes, every browser and visual gate, identity verification and packaging |
+| CI (legacy) | [45570668724](https://github.com/Jakoczig/eridion/actions/runs/45570668724) | success |
 
-**Earlier run on `667399a`** ([45564718884](https://github.com/Jakoczig/eridion/actions/runs/45564718884)): Linux passed and Windows failed.
-- **Cause:** the 600-journal service test committed only about 8 journals per second on the Windows runner (one full-sync SQLite transaction per journal). It timed out, and because it never stopped its service, the leftover I/O starved three timing tests that ran alongside it.
-- **Fix:** `358b91f` lowers the discovery limits for that test and stops the service on every exit path. It is still red without either fix.
-- No test was skipped or weakened.
+**History on this PR.** Each failure was fixed in a test without skipping or weakening it:
+- **`667399a`** ([45564718884](https://github.com/Jakoczig/eridion/actions/runs/45564718884)): Windows failed. The 600-journal service test committed only about 8 journals per second on the runner (one full-sync SQLite transaction per journal) and timed out. Because it never stopped its service, the leftover I/O starved three timing tests that ran alongside it. `358b91f` lowers that test's discovery limits and stops the service on every exit path. It is still red without either fix.
+- **`358b91f`** ([45566787212](https://github.com/Jakoczig/eridion/actions/runs/45566787212)): success on both OSes.
+- **`fee5e9c`** (docs only, [45568941578](https://github.com/Jakoczig/eridion/actions/runs/45568941578)): Windows failed in the G3K test `TestPerfDomainRevisionDemand`. The test asserted that every domain had been republished after the Shutdown event's own publish, but that republish arrives with the source-state change on the next tick. `1296beb` waits for that change and for every revision to advance within the same deadline; a domain that is never republished still fails. It did not reproduce in 150 Linux runs on G3L or on the G3K base, so it is a test race, not a publication defect.
 
-**Unsigned previews** (14-day Actions artifacts from run 45566787212, downloaded and verified):
+**Unsigned previews** (14-day Actions artifacts from run 45570668669, downloaded and verified):
 
 | Artifact | Contents | Identity |
 | --- | --- | --- |
-| `eridion-2.2.0-g3l-358b91f30dfe-windows-amd64-experimental-unsigned-preview` | `eridion.exe`, `README.md`, `BUILD-IDENTITY.json`, `SHA256SUMS` (all OK) | `2.2.0-g3l+358b91f30dfe`, windows/amd64 |
-| `eridion-2.2.0-g3l-358b91f30dfe-linux-amd64-experimental-unsigned-preview` | `eridion`, `README.md`, `BUILD-IDENTITY.json`, `SHA256SUMS` (all OK) | `2.2.0-g3l+358b91f30dfe`, linux/amd64 |
+| `eridion-2.2.0-g3l-1296beba41d4-windows-amd64-experimental-unsigned-preview` | `eridion.exe`, `README.md`, `BUILD-IDENTITY.json`, `SHA256SUMS` (all OK) | `2.2.0-g3l+1296beba41d4`, windows/amd64 |
+| `eridion-2.2.0-g3l-1296beba41d4-linux-amd64-experimental-unsigned-preview` | `eridion`, `README.md`, `BUILD-IDENTITY.json`, `SHA256SUMS` (all OK) | `2.2.0-g3l+1296beba41d4`, linux/amd64 |
 
-- Both manifests record `ci.pullRequestHead = builtRevision = 358b91f…`.
-- They record `syntheticMergeCommit = c33441c986cb643c7b699a07585feb2ecac87ab6` with `syntheticMergeBuilt: false`.
-- On each runner, "Verify embedded build identity" printed the executable's own report: `revision` 358b91f…, `vcs.revision` 358b91f… and `vcs.modified` false. Packaging then cross-checked it against the manifest.
+- Both manifests record `ci.pullRequestHead = builtRevision = 1296beb…`.
+- They record `syntheticMergeCommit = dd2de3d41104a68e56a61d31d408570ea19dff57` with `syntheticMergeBuilt: false`.
+- On each runner, "Verify embedded build identity" printed the executable's own report: `revision` and `vcs.revision` 1296beb… with `vcs.modified` false. Packaging then cross-checked it against the manifest.
 - No release, tag, signing, deployment or upload outside Actions artifacts was performed.
 
-This ledger is committed after the verified source commit. It is documentation only, and its own CI run is linked from PR #34.
+This ledger revision is committed after the verified source commit and is documentation only.
 
 ## Remaining physical and real-game gaps
 
