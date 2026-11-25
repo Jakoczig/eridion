@@ -395,7 +395,17 @@ func (s *Service) Run(ctx context.Context) error {
 				if s.store != nil {
 					durable = s
 				}
-				reader, _ = journal.NewReader(directory, journal.ReaderOptions{PollInterval: opts.PollInterval, Durable: durable})
+				// Task 9: when a large backlog committed history behind the
+				// active journal, rebuild derived state chronologically from
+				// durable history (the existing maintenance path stops and
+				// restarts the reader). Asynchronous: the reader calls this.
+				reordered := func() {
+					if s.store == nil {
+						return
+					}
+					go func() { _ = s.RebuildDerived(ctx, "") }()
+				}
+				reader, _ = journal.NewReader(directory, journal.ReaderOptions{PollInterval: opts.PollInterval, Durable: durable, HistoryReordered: reordered})
 				snapshots, _ = sidecar.NewReader(directory, sidecar.Options{StationData: s.store != nil})
 				if reader != nil {
 					readerCtx, cancel := context.WithCancel(ctx)
@@ -525,7 +535,8 @@ func (s *Service) Run(ctx context.Context) error {
 			} else {
 				s.summary.ImportInProgress = false
 			}
-			if !s.summary.ImportInProgress {
+			backlog := reader != nil && reader.Stats().Backlog > 0
+			if !s.summary.ImportInProgress && !backlog {
 				// History is complete: check the stored default against the
 				// verified commanders, then adopt one only if exactly one
 				// verified commander exists, never by import order.
@@ -533,7 +544,7 @@ func (s *Service) Run(ctx context.Context) error {
 				s.adoptDefaultLocked()
 			}
 			if s.store != nil && s.databaseError == "" {
-				if s.summary.ImportInProgress {
+				if s.summary.ImportInProgress || backlog {
 					if s.restored {
 						s.summary.Stage = "CATCHING_UP"
 					} else {

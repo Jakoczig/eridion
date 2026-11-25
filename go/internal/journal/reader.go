@@ -29,13 +29,31 @@ type ReaderOptions struct {
 	Durable        Durable
 	PollInterval   time.Duration
 	MaxRecordBytes int
+	// HistoryReordered is called once when a backlog finished after older
+	// journals committed new records behind the active one (Task 9): the
+	// caller rebuilds derived state chronologically from durable history.
+	HistoryReordered func()
 }
+
+// Bounded discovery (Task 9 / F11). Directories up to fullScanLimit journals
+// are read completely on every poll, as before. Larger ones are read in
+// bounded batches: the two newest journals (active and just rolled over)
+// first, then up to defaultBacklogBatch unread journals in chronological
+// order, then a round-robin slice of settled journals to detect changes.
+var (
+	maxDirectoryEntries = 65536
+	fullScanLimit       = 512
+	defaultBacklogBatch = 256
+)
+
 type ReaderStats struct {
 	SourceState                                   string
 	LastError                                     string
 	Files                                         int
 	EventsRead, MalformedLines, BytesRead, Resets uint64
 	Pending, ImportInProgress                     bool
+	// Backlog counts journals not yet read in this run (bounded discovery).
+	Backlog int
 }
 type cursor struct {
 	info                os.FileInfo
@@ -55,6 +73,8 @@ type Reader struct {
 	serial      uint64
 	started     bool
 	startedAt   time.Time
+	roundRobin  int
+	reordered   bool
 	running     atomic.Bool
 }
 
@@ -124,14 +144,17 @@ func (r *Reader) poll(ctx context.Context, emit func(Event, Phase) error) error 
 		r.sourceError(err)
 		return nil
 	}
-	entries, err := f.ReadDir(4097)
+	entries, err := f.ReadDir(maxDirectoryEntries + 1)
 	f.Close()
 	if err != nil && !errors.Is(err, io.EOF) {
 		r.sourceError(err)
 		return nil
 	}
-	if len(entries) > 4096 {
-		r.change(func(s *ReaderStats) { s.SourceState = "source_error"; s.LastError = "journal file count exceeds limit" })
+	if len(entries) > maxDirectoryEntries {
+		r.change(func(s *ReaderStats) {
+			s.SourceState = "source_error"
+			s.LastError = "journal directory exceeds " + strconv.Itoa(maxDirectoryEntries) + " entries"
+		})
 		return nil
 	}
 	var names []string
@@ -159,20 +182,78 @@ func (r *Reader) poll(ctx context.Context, emit func(Event, Phase) error) error 
 	}
 	current := map[string]bool{}
 	for _, name := range names {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
 		current[name] = true
-		if err := r.readFile(ctx, name, emit); err != nil {
-			return err
-		}
 	}
 	for name := range r.cursors {
 		if !current[name] {
 			delete(r.cursors, name)
 		}
 	}
+	work, backlogMode := r.plan(names)
+	for _, name := range work {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		older := backlogMode && journalLess(name, names[max(0, len(names)-2)]) // behind the hot journals
+		before := r.Stats().EventsRead                                         // counts emitted and durably committed records
+		if err := r.readFile(ctx, name, emit); err != nil {
+			return err
+		}
+		if older && r.Stats().EventsRead > before {
+			r.reordered = true // history committed behind the active journal
+		}
+	}
+	backlog := 0
+	for _, name := range names {
+		if r.cursors[name] == nil {
+			backlog++
+		}
+	}
+	r.change(func(s *ReaderStats) { s.Backlog = backlog })
+	if backlog == 0 && r.reordered {
+		r.reordered = false
+		if r.opts.HistoryReordered != nil {
+			r.opts.HistoryReordered()
+		}
+	}
 	return nil
+}
+
+// plan chooses this poll's journals (chronological names). Small directories
+// are read completely; large ones in bounded batches with the newest
+// journals first so live ingestion and rollover never wait for history.
+func (r *Reader) plan(names []string) ([]string, bool) {
+	if len(names) <= fullScanLimit {
+		return names, false
+	}
+	hot := names[max(0, len(names)-2):]
+	work := append([]string(nil), hot...)
+	inWork := map[string]bool{}
+	for _, n := range hot {
+		inWork[n] = true
+	}
+	unread := 0
+	for _, n := range names {
+		if unread >= defaultBacklogBatch {
+			break
+		}
+		if r.cursors[n] == nil && !inWork[n] {
+			work = append(work, n)
+			inWork[n] = true
+			unread++
+		}
+	}
+	// Round-robin over settled journals: changes to old journals are still
+	// detected, within len(names)/defaultBacklogBatch polls.
+	for k := 0; k < defaultBacklogBatch && k < len(names); k++ {
+		n := names[(r.roundRobin+k)%len(names)]
+		if !inWork[n] && r.cursors[n] != nil {
+			work = append(work, n)
+			inWork[n] = true
+		}
+	}
+	r.roundRobin = (r.roundRobin + defaultBacklogBatch) % len(names)
+	return work, unread > 0
 }
 func (r *Reader) sourceError(err error) {
 	r.change(func(s *ReaderStats) {
