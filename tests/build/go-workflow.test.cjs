@@ -2,6 +2,7 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
+const expr = x => '$' + '{{ ' + x + ' }}'
 const YAML = require('yaml')
 
 test('both desktop OSes have blocking build, security and real executable gates', () => {
@@ -35,12 +36,14 @@ test('both desktop OSes have blocking build, security and real executable gates'
   assert.match(job.steps.find(step => step.name === 'Native journal smoke').run, /--desktop-journal-smoke-test/)
   assert.match(job.steps.find(step => step.name === 'Go tests').run, /-count=1/, 'idle/reconnect acceptance must execute freshly on both OSes')
   const pack = job.steps.findIndex(step => step.name === 'Package experimental preview')
-  const upload = job.steps.findIndex(step => String(step.uses).startsWith('actions/upload-artifact@') && String(step.with?.name).startsWith('eridion-g3e-') && String(step.with?.name).endsWith('-x64-experimental-unsigned-preview'))
+  // G3L Task 10: the preview artifact name comes from the generated build
+  // identity (never a hardcoded milestone label).
+  const upload = job.steps.findIndex(step => String(step.uses).startsWith('actions/upload-artifact@') && step.with?.name === expr('steps.preview.outputs.artifact'))
   assert.ok(pack > job.steps.findIndex(step => step.name === 'Native React smoke'), 'packaging must follow all security/native gates')
   assert.ok(pack > job.steps.findIndex(step => step.name === 'Native journal smoke'), 'artifact must wait for G2A native data validation')
   assert.ok(upload > pack, 'missing gated artifact upload')
   assert.equal(job.steps[upload].if, undefined, 'artifact upload must use default success gating')
-  assert.match(job.steps[upload].with.name, /g3e-.*experimental-unsigned-preview/)
+  assert.ok(!/g3e|g3g/.test(job.steps[upload].with.name), 'stale hardcoded milestone in artifact name')
   assert.equal(job.steps[upload].with['if-no-files-found'], 'error')
   assert.match(job.steps[upload].with.path, /^\$\{\{ steps\.preview\.outputs\.directory \}\}$/)
 })
@@ -222,4 +225,26 @@ test('G3E checks G3D and packages only after stable geometry and search browser 
   assert.ok(visual > 0)
   assert.equal(steps[visual].if, undefined)
   assert.ok(steps.findIndex(s => s.name === 'Package experimental preview') > visual)
+})
+
+test('G3L checks G3K and binds build, executable and preview to one generated identity', () => {
+  const workflow = YAML.parse(fs.readFileSync(path.join(__dirname, '../../.github/workflows/go-desktop.yml'), 'utf8'))
+  const legacy = YAML.parse(fs.readFileSync(path.join(__dirname, '../../.github/workflows/ci.yml'), 'utf8'))
+  assert.ok(workflow.on.pull_request.branches.includes('go/g3k-native-performance'), 'desktop CI must check the G3L stacked target')
+  assert.ok(legacy.on.pull_request.branches.includes('go/g3k-native-performance'), 'legacy CI must check the G3L stacked target')
+  const steps = workflow.jobs.desktop.steps
+  const checkout = steps.find(s => String(s.uses).startsWith('actions/checkout@'))
+  assert.equal(checkout.with?.ref, expr('github.event.pull_request.head.sha || github.sha'), 'build the PR source commit, not the synthetic merge')
+  const identity = steps.findIndex(s => s.id === 'identity')
+  const build = steps.findIndex(s => s.name === 'Build native desktop')
+  const verify = steps.findIndex(s => s.name === 'Verify embedded build identity')
+  const pack = steps.findIndex(s => s.name === 'Package experimental preview')
+  assert.ok(identity >= 0 && identity < build && build < verify && verify < pack)
+  assert.match(steps[identity].run, /go-build-identity\.cjs --milestone g3l/)
+  assert.match(steps[build].run, /-buildvcs=true -ldflags "\$\{\{ steps\.identity\.outputs\.ldflags \}\}"/)
+  assert.match(steps[verify].run, /--build-info/)
+  assert.match(steps[verify].run, /steps\.identity\.outputs\.revision/)
+  assert.equal(steps[pack].env.ERIDION_BUILD_IDENTITY, expr('steps.identity.outputs.identity'))
+  assert.equal(steps[pack].env.ERIDION_EXPECTED_ARTIFACT, expr('steps.identity.outputs.artifact'))
+  for (const s of steps) assert.ok(!String(s.with?.name).includes('eridion-g3e-' + expr('runner.os') + '-x64'), 'stale G3E preview name')
 })
