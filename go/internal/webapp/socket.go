@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"github.com/Jakoczig/eridion/go/internal/gamestate"
 	"github.com/Jakoczig/eridion/go/internal/paritystate"
+	"github.com/Jakoczig/eridion/go/internal/perfstats"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -173,11 +174,11 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 			}
 		}
 	}()
+	contextResync := make(chan struct{}, 1)
 	if s.game != nil && s.g2e {
 		go func() {
 			ticker := time.NewTicker(time.Second)
 			defer ticker.Stop()
-			var previous any
 			var previousProviders any
 			var spatialRevision uint64
 			for {
@@ -226,16 +227,47 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 							}
 						}
 					}
-					if !want(topicContext, contextRequested.Load()) {
-						continue
-					}
-					v := s.contextView(principal)
+				}
+			}
+		}()
+		// Navigation context (G3L): delivered on change, not sampled. The
+		// loop wakes when a context input changes (journal, Status flight
+		// mode, NavRoute, commander, source state), the display policy
+		// changes, demand/visibility changes, or the time-dependent mode
+		// window opens/closes. It sends only the latest value, only when it
+		// differs from what this connection last received, and nothing while
+		// the display is hidden; a resumed display gets the current state.
+		go func() {
+			var previous any
+			timer := time.NewTimer(time.Hour)
+			timer.Stop()
+			defer timer.Stop()
+			for {
+				_, changed := s.game.NavigationContextSignal()
+				policy := s.policySignal()
+				timer.Stop()
+				d := s.connDemand(conn)
+				requested := contextRequested.Load()
+				if (!d.declared && requested) || (d.declared && d.allows(topicContext) && requested) {
+					v, until := s.contextView(principal)
 					if !reflect.DeepEqual(previous, v) {
 						previous = v
+						perfstats.Add("context.push", 1)
 						if send(map[string]any{"name": "goNavigationContextChanged", "message": v}) != nil {
 							return
 						}
 					}
+					if !until.IsZero() {
+						timer.Reset(time.Until(until))
+					}
+				}
+				select {
+				case <-readCtx.Done():
+					return
+				case <-changed:
+				case <-policy:
+				case <-timer.C:
+				case <-contextResync:
 				}
 			}
 		}()
@@ -454,6 +486,10 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 				default:
 				}
 				select {
+				case contextResync <- struct{}{}:
+				default:
+				}
+				select {
 				case resyncSummary <- struct{}{}:
 				default:
 				}
@@ -540,6 +576,10 @@ func (s *Server) serveSocket(w http.ResponseWriter, r *http.Request, principal s
 			} else {
 				contextRequested.Store(true)
 				response["message"] = s.freshContextView(principal)
+				select {
+				case contextResync <- struct{}{}:
+				default:
+				}
 			}
 		case "getGoSystem", "lookupGoSystem":
 			if !s.g2e || s.game == nil || s.community == nil {

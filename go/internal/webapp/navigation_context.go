@@ -11,43 +11,51 @@ import (
 )
 
 func strictDecode(raw []byte, v any) error { return navcontext.Decode(raw, v) }
-func (s *Server) contextView(p socketPrincipal) any {
-	return map[string]any{"navigation": s.navContext.get(s.game.NavigationContext, s.account.current()), "policy": s.displayPolicy(p)}
+
+// contextView returns the shared navigation context with the instant it next
+// changes by time alone (zero: only an event changes it).
+func (s *Server) contextView(p socketPrincipal) (any, time.Time) {
+	v, until := s.navContext.get(s.game, s.account.current())
+	return map[string]any{"navigation": v, "policy": s.displayPolicy(p)}, until
 }
 
 // freshContextView builds the context now: an explicit read (for example
-// right after a jump) never receives the shared, up to 900 ms old copy
-// (review R6).
+// right after a jump) never receives a shared copy (review R6).
 func (s *Server) freshContextView(p socketPrincipal) any {
 	perfstats.Add("context.build", 1)
 	return map[string]any{"navigation": s.game.NavigationContext(), "policy": s.displayPolicy(p)}
 }
 
 // navContextMemo shares one navigation-context build among every connection
-// for up to navContextTTL (G3K PERF-06): the context is time-dependent
-// (FSD freshness), so connections still observe it at the existing one-second
-// cadence, but N displays no longer build it N times. An account epoch change
-// invalidates it.
+// (G3K PERF-06). G3L: the copy is keyed by the context signal sequence and
+// stays valid until an input changes or its time deadline passes, instead of
+// a 900 ms TTL; an account epoch change invalidates it.
 type navContextMemo struct {
 	mu    sync.Mutex
-	at    time.Time
 	epoch uint64
+	seq   uint64
+	until time.Time
 	value navcontext.View
 	set   bool
 }
 
-const navContextTTL = 900 * time.Millisecond
+type navContextSource interface {
+	NavigationContextSignal() (uint64, <-chan struct{})
+	NavigationContextSnapshot() (navcontext.View, uint64, time.Time)
+}
 
-func (m *navContextMemo) get(build func() navcontext.View, epoch uint64) navcontext.View {
+func (m *navContextMemo) get(src navContextSource, epoch uint64) (navcontext.View, time.Time) {
+	seq, _ := src.NavigationContextSignal()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.set && m.epoch == epoch && time.Since(m.at) < navContextTTL {
+	if m.set && m.epoch == epoch && m.seq == seq && (m.until.IsZero() || time.Now().Before(m.until)) {
 		perfstats.Add("context.reuse", 1)
-		return m.value
+		return m.value, m.until
 	}
 	perfstats.Add("context.build", 1)
-	m.value, m.at, m.epoch, m.set = build(), time.Now(), epoch, true
-	return m.value
+	m.value, m.seq, m.until = src.NavigationContextSnapshot()
+	m.epoch, m.set = epoch, true
+	return m.value, m.until
 }
 func (s *Server) systemView(ctx context.Context, name string, lookup bool) any {
 	p, local := s.game.KnownSystem(name)

@@ -211,6 +211,7 @@ func (s *Service) applyProjectionsLocked(e journal.Event, phase journal.Phase) {
 	s.views.navigation.ApplyEventPhase(s.active, e, phase)
 	s.views.exploration.ApplyEvent(s.active, e)
 	s.views.dirty = true
+	s.navSignal.gen++
 }
 func (s *Service) sidecarProjectionLocked(c sidecar.Change) {
 	if c.Kind == "Status" {
@@ -223,7 +224,9 @@ func (s *Service) sidecarProjectionLocked(c sidecar.Change) {
 	if s.opts.EnableParity {
 		s.views.parity.ApplySidecar(s.active, c)
 		if c.Kind == "Status" && !s.summary.ImportInProgress && s.summary.SourceState == "live" {
-			s.navigationContext.Status(s.active, s.views.parity.Status(s.active))
+			if s.navigationContext.Status(s.active, s.views.parity.Status(s.active)) {
+				s.navSignal.gen++
+			}
 		}
 		// Sidecars (Status, Cargo, ...) only feed the workspace model.
 		s.markDomainsLocked(DomainWorkspace)
@@ -231,12 +234,14 @@ func (s *Service) sidecarProjectionLocked(c sidecar.Change) {
 	if c.Kind == "NavRoute" {
 		s.views.navigation.ApplySidecar(c)
 		s.markDomainsLocked(DomainNavigation)
+		s.navSignal.gen++
 	}
 }
 func (s *Service) resetProjectionsLocked() {
 	s.startup = journal.Startup{}
 	s.views.ship.ResetSource()
 	s.navigationContext = navcontext.New()
+	s.navSignal.gen++
 	s.views.parity.ResetSource()
 	s.views.activity.ResetSource()
 	s.views.navigation.ResetSource()
@@ -245,6 +250,7 @@ func (s *Service) resetProjectionsLocked() {
 	s.views.dirty = true
 }
 func (s *Service) publishProjectionsLocked() {
+	s.signalNavigationContextLocked()
 	key := s.projectionKeyLocked()
 	whole := !s.views.hasLast || key != s.views.lastKey || s.cachedImportLocked()
 	if !whole && !s.views.dirty && s.views.partial == 0 {

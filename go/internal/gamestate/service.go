@@ -95,6 +95,7 @@ type Service struct {
 	cachedProjection    *Projections
 	cachedProjectionFID string
 	navigationContext   *navcontext.Model
+	navSignal           navContextSignal
 	mu                  perfstats.Mutex
 	views               projectionState
 	opts                Options
