@@ -284,6 +284,8 @@ G3D also passed earlier with 600 ms delayed context messages.
 - **`358b91f`** ([45566787212](https://github.com/Jakoczig/eridion/actions/runs/45566787212)): success on both OSes.
 - **`fee5e9c`** (docs only, [45568941578](https://github.com/Jakoczig/eridion/actions/runs/45568941578)): Windows failed in the G3K test `TestPerfDomainRevisionDemand`. The test asserted that every domain had been republished after the Shutdown event's own publish, but that republish arrives with the source-state change on the next tick. `1296beb` waits for that change and for every revision to advance within the same deadline; a domain that is never republished still fails. It did not reproduce in 150 Linux runs on G3L or on the G3K base, so it is a test race, not a publication defect.
 
+- **`87e7267`** (docs only, [45573019718](https://github.com/Jakoczig/eridion/actions/runs/45573019718)): Go tests passed, but the Windows G2N browser gate aborted with Chrome's "Inspected target navigated or closed". The shared gate harness's `waitFor` treated a poll that raced G2N's deliberate commander-switch redirect as a fatal error. The harness now retries only those transient navigation errors; any other error still fails, and a condition that never holds still times out (`tests/build/visual-wait.test.cjs`). The redirect is the same in G3K and G3L, so this is a harness race. G2N, G2D and G3D passed locally after the change. The CI result for that commit is recorded in PR #34.
+
 **Unsigned previews** (14-day Actions artifacts from run 45570668669, downloaded and verified):
 
 | Artifact | Contents | Identity |
