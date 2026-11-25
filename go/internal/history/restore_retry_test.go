@@ -196,3 +196,51 @@ func TestAuditRestoreInterruptedRestartRecovers(t *testing.T) {
 		t.Fatalf("second start: %q", got)
 	}
 }
+
+// Review #4: SQLite sidecars left without a staged database are moved aside,
+// never replayed into the next stage.
+func TestAuditRestoreOrphanSidecarsQuarantined(t *testing.T) {
+	dir, backup := restoreFixture(t)
+	wal := filepath.Join(dir, "restore.pending.sqlite-wal")
+	f, err := privatefs.PrivateFile(wal, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.WriteString("stale wal")
+	f.Close()
+	if err = StageRecovery(context.Background(), dir, backup); err != nil {
+		t.Fatal(err)
+	}
+	kept, _ := filepath.Glob(filepath.Join(dir, "backups", "unexplained-stage-*", "restore.pending.sqlite-wal"))
+	if len(kept) != 1 {
+		t.Fatalf("orphan WAL not preserved aside: %v", kept)
+	}
+	if got := cacheAfterOpen(t, dir); got != "backup" {
+		t.Fatalf("%q", got)
+	}
+}
+
+// Review #3: concurrent staging requests are serialised: exactly one stage is
+// installed, the other is refused as "already staged", and nothing is lost.
+func TestAuditRestoreConcurrentStaging(t *testing.T) {
+	dir, backup := restoreFixture(t)
+	errs := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() { errs <- StageRecovery(context.Background(), dir, backup) }()
+	}
+	ok := 0
+	for i := 0; i < 2; i++ {
+		if <-errs == nil {
+			ok++
+		}
+	}
+	if ok != 1 {
+		t.Fatalf("%d concurrent stagings succeeded, want exactly 1", ok)
+	}
+	if m, _ := filepath.Glob(filepath.Join(dir, "backups", "unexplained-stage-*")); len(m) != 0 {
+		t.Fatalf("a concurrent attempt quarantined the other's stage: %v", m)
+	}
+	if got := cacheAfterOpen(t, dir); got != "backup" {
+		t.Fatalf("%q", got)
+	}
+}

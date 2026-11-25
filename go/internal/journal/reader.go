@@ -75,7 +75,11 @@ type Reader struct {
 	startedAt   time.Time
 	roundRobin  int
 	reordered   bool
-	running     atomic.Bool
+	// unreadable holds journals whose open failed this run (permission,
+	// exclusive lock): they are retried by the round-robin, not counted as
+	// backlog, so one locked file cannot hold import open forever (review #2).
+	unreadable map[string]bool
+	running    atomic.Bool
 }
 
 func NewReader(dir string, opts ReaderOptions) (*Reader, error) {
@@ -189,6 +193,11 @@ func (r *Reader) poll(ctx context.Context, emit func(Event, Phase) error) error 
 			delete(r.cursors, name)
 		}
 	}
+	for name := range r.unreadable {
+		if !current[name] {
+			delete(r.unreadable, name)
+		}
+	}
 	work, backlogMode := r.plan(names)
 	for _, name := range work {
 		if ctx.Err() != nil {
@@ -202,20 +211,30 @@ func (r *Reader) poll(ctx context.Context, emit func(Event, Phase) error) error 
 		if older && r.Stats().EventsRead > before {
 			r.reordered = true // history committed behind the active journal
 		}
+		if r.cursors[name] == nil {
+			if r.unreadable == nil {
+				r.unreadable = map[string]bool{}
+			}
+			r.unreadable[name] = true
+		} else {
+			delete(r.unreadable, name)
+		}
 	}
 	backlog := 0
 	for _, name := range names {
-		if r.cursors[name] == nil {
+		if r.cursors[name] == nil && !r.unreadable[name] {
 			backlog++
 		}
 	}
-	r.change(func(s *ReaderStats) { s.Backlog = backlog })
+	// The reorder callback runs before the empty backlog is published, so a
+	// caller never observes "backlog drained" without the pending rebuild.
 	if backlog == 0 && r.reordered {
 		r.reordered = false
 		if r.opts.HistoryReordered != nil {
 			r.opts.HistoryReordered()
 		}
 	}
+	r.change(func(s *ReaderStats) { s.Backlog = backlog })
 	return nil
 }
 
@@ -237,7 +256,7 @@ func (r *Reader) plan(names []string) ([]string, bool) {
 		if unread >= defaultBacklogBatch {
 			break
 		}
-		if r.cursors[n] == nil && !inWork[n] {
+		if r.cursors[n] == nil && !r.unreadable[n] && !inWork[n] {
 			work = append(work, n)
 			inWork[n] = true
 			unread++
@@ -247,7 +266,7 @@ func (r *Reader) plan(names []string) ([]string, bool) {
 	// detected, within len(names)/defaultBacklogBatch polls.
 	for k := 0; k < defaultBacklogBatch && k < len(names); k++ {
 		n := names[(r.roundRobin+k)%len(names)]
-		if !inWork[n] && r.cursors[n] != nil {
+		if !inWork[n] && (r.cursors[n] != nil || r.unreadable[n]) {
 			work = append(work, n)
 			inWork[n] = true
 		}

@@ -104,3 +104,32 @@ func TestG3LNavigationContextSignal(t *testing.T) {
 	}
 	waitSignal(t, s, seq, ch)
 }
+
+// Review: every navContextKey input advances the signal: display commander,
+// source state, cached and import flags, and a reset of the context model.
+func TestG3LNavigationSignalKeyInputs(t *testing.T) {
+	s, err := NewService(Options{EnableParity: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	advance := func(name string, mutate func()) {
+		t.Helper()
+		s.mu.Lock()
+		s.signalNavigationContextLocked()
+		before := s.navSignal.seq
+		mutate()
+		s.signalNavigationContextLocked()
+		after := s.navSignal.seq
+		s.signalNavigationContextLocked()
+		again := s.navSignal.seq
+		s.mu.Unlock()
+		if after != before+1 || again != after {
+			t.Fatalf("%s: seq %d -> %d -> %d", name, before, after, again)
+		}
+	}
+	advance("source state", func() { s.summary.SourceState = "live" })
+	advance("cached", func() { s.summary.Cached = !s.summary.Cached })
+	advance("import", func() { s.summary.ImportInProgress = !s.summary.ImportInProgress })
+	advance("reset", func() { s.resetProjectionsLocked() })
+	advance("journal event", func() { s.navSignal.gen++ })
+}

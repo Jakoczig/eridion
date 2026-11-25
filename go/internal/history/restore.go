@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -26,6 +27,10 @@ func (s *Store) StageRestore(ctx context.Context, source string) error {
 // StageRecovery is also usable when the active DB is corrupt. It never opens it
 // for mutation: only a verified selected backup is staged, pending an app restart.
 func StageRecovery(ctx context.Context, dir, source string) error {
+	// One staging at a time (review #3): a concurrent attempt must not remove
+	// another attempt's temporary copy or quarantine its fresh stage.
+	stageMu.Lock()
+	defer stageMu.Unlock()
 	if !filepath.IsAbs(source) {
 		return errors.New("Select an absolute private backup path")
 	}
@@ -151,7 +156,20 @@ func clearStaleStage(dir, pendingPath string) error {
 		}
 	}
 	if _, err := os.Lstat(pendingPath); os.IsNotExist(err) {
-		return nil
+		// No staged database, but SQLite sidecars left beside the slot would
+		// be replayed into the next stage (review #4): move them aside.
+		// A lone intent is the interrupted-restart state consumeRestore
+		// completes at startup, so it stays.
+		var orphans []string
+		for _, name := range []string{"restore.pending.sqlite-wal", "restore.pending.sqlite-shm"} {
+			if _, e := os.Lstat(filepath.Join(dir, name)); e == nil {
+				orphans = append(orphans, name)
+			}
+		}
+		if len(orphans) == 0 {
+			return nil
+		}
+		return quarantineStage(dir, orphans)
 	} else if err != nil {
 		return err
 	}
@@ -163,6 +181,12 @@ func clearStaleStage(dir, pendingPath string) error {
 			}
 		}
 	}
+	return quarantineStage(dir, []string{"restore.pending.sqlite", "restore.pending.sqlite-wal", "restore.pending.sqlite-shm", "restore.pending.json"})
+}
+
+// quarantineStage moves the named staging files, unchanged, into a new
+// backups/unexplained-stage-<time> directory.
+func quarantineStage(dir string, names []string) error {
 	evidence := filepath.Join(dir, "backups", "unexplained-stage-"+time.Now().UTC().Format("20060102T150405.000000000Z"))
 	if err := privatefs.Prepare(filepath.Join(dir, "backups")); err != nil {
 		return err
@@ -170,7 +194,7 @@ func clearStaleStage(dir, pendingPath string) error {
 	if err := privatefs.Prepare(evidence); err != nil {
 		return err
 	}
-	for _, name := range []string{"restore.pending.sqlite", "restore.pending.sqlite-wal", "restore.pending.sqlite-shm", "restore.pending.json"} {
+	for _, name := range names {
 		src := filepath.Join(dir, name)
 		if _, err := os.Lstat(src); os.IsNotExist(err) {
 			continue
@@ -271,6 +295,8 @@ func consumeRestore(dir string) error {
 	}
 	return os.Remove(filepath.Join(dir, "restore.pending.json"))
 }
+
+var stageMu sync.Mutex
 
 // restoreFault injects failures at staging steps in tests.
 var restoreFault func(step string) error

@@ -213,8 +213,14 @@ func (m *Model) Status(key string, v paritystate.StatusView) (changed bool) {
 	}
 	// A continuing mode only extends its window (modeAt); the view is
 	// unchanged and the extension is picked up at the previous deadline.
+	// A mode whose window had already expired at this observation was not
+	// visible; showing it again is a change even with the same episode
+	// (review #5).
 	mode, episode := s.mode, s.episode
-	defer func() { changed = mode != s.mode || episode != s.episode }()
+	wasVisible := s.mode != "" && at.Sub(s.modeAt) < modeWindow
+	defer func() {
+		changed = mode != s.mode || episode != s.episode || (!wasVisible && s.mode != "")
+	}()
 	s.statusAt = at
 	// Prefer the modern hyperdrive flag; old Status writers only expose FSDCharging.
 	charging := v.Flags2 != nil && v.Flags2.FSDHyperdriveCharging || v.Flags2 == nil && v.Flags.FSDCharging

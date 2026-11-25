@@ -121,3 +121,37 @@ func TestAuditDiscoveryHardBound(t *testing.T) {
 		t.Fatalf("%+v", st)
 	}
 }
+
+// Review #2: a journal that cannot be opened (permissions, an exclusive lock)
+// is retried, but it is not counted as backlog forever, so it cannot hold the
+// import open and block default-commander validation.
+func TestAuditDiscoveryUnreadableJournalNotBacklog(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("POSIX permission fixture")
+	}
+	dir := t.TempDir()
+	for i := 1; i <= 3; i++ {
+		writeJournal(t, dir, i, fmt.Sprintf("Old %d", i))
+	}
+	locked := filepath.Join(dir, backlogName(2))
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(locked, 0o600)
+	r, _ := NewReader(dir, ReaderOptions{PollInterval: time.Millisecond})
+	seen := map[string]int{}
+	emit := func(e Event, _ Phase) error { seen[e.SystemName]++; return nil }
+	if err := r.poll(context.Background(), emit); err != nil {
+		t.Fatal(err)
+	}
+	if b := r.Stats().Backlog; b != 0 {
+		t.Fatalf("an unreadable journal is counted as backlog forever: %d", b)
+	}
+	os.Chmod(locked, 0o600)
+	if err := r.poll(context.Background(), emit); err != nil {
+		t.Fatal(err)
+	}
+	if seen["Old 2"] != 1 || seen["Old 1"] != 1 || seen["Old 3"] != 1 {
+		t.Fatalf("readable again, but not read exactly once: %v", seen)
+	}
+}

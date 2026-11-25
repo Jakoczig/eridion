@@ -103,6 +103,11 @@ type navContextKey struct {
 	importing, cached, set bool
 }
 
+// signalNavigationContextLocked is called from publishProjectionsLocked, the
+// single publication point: live journal commits (publishLocked), replay
+// commits (throttled) and every service tick (sidecars, source state) reach
+// it, so an input change is signalled within one poll interval (review #6).
+// A new mutation path must publish through it as well.
 func (s *Service) signalNavigationContextLocked() {
 	k := navContextKey{gen: s.navSignal.gen, fid: s.displayFIDLocked(), source: s.summary.SourceState, importing: s.summary.ImportInProgress, cached: s.summary.Cached, set: true}
 	if k == s.navSignal.key {

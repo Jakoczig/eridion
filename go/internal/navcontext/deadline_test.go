@@ -55,3 +55,22 @@ func TestG3LStatusChangeAndDeadline(t *testing.T) {
 		t.Fatal("delayed Status older than the last observation changed the mode")
 	}
 }
+
+// Review #5: a Status that re-opens an expired mode window is a change.
+func TestG3LExpiredModeReopenedIsChange(t *testing.T) {
+	m := New()
+	feed(t, m, "a", `{"event":"LoadGame","timestamp":"2026-01-01T00:00:01Z","FID":"a"}`, journal.Live)
+	feed(t, m, "a", `{"event":"Location","timestamp":"2026-01-01T00:00:02Z","StarSystem":"Fixture","SystemAddress":1}`, journal.Live)
+	v := paritystate.StatusView{State: "known", ObservedAt: "2026-01-01T00:00:03Z", Flags: &paritystate.StatusFlags{InMainShip: true}, Flags2: &paritystate.StatusFlags2{FSDHyperdriveCharging: true}}
+	if !m.Status("a", v) {
+		t.Fatal("charge")
+	}
+	v.ObservedAt = "2026-01-01T00:01:10Z" // 67 s later, still charging, window expired
+	if !m.Status("a", v) {
+		t.Fatal("re-opened expired window not reported")
+	}
+	at, _ := time.Parse(time.RFC3339, v.ObservedAt)
+	if m.View("a", at).Mode != "charge" {
+		t.Fatal("view")
+	}
+}

@@ -250,3 +250,24 @@ func TestG3LContextBuildSharedAcrossDisplays(t *testing.T) {
 	}
 	t.Logf("2 transitions x %d displays: %d signals, %d builds, %d reuses, %d pushes", len(displays), c["context.signal"], c["context.build"], c["context.reuse"], c["context.push"])
 }
+
+// Review: the only scheduled refresh left is the mode deadline. A charge whose
+// observation time is slightly in the future opens its window at that instant:
+// nothing is pushed before it, and the timer delivers it without any event.
+func TestG3LModeDeadlineTimerDelivers(t *testing.T) {
+	_, dir, paired, owner := liveFixture(t)
+	paired.drain(150 * time.Millisecond)
+	owner.drain(0)
+	opens := time.Now().Add(700 * time.Millisecond)
+	writeStatus(t, dir, opens, 0x01000000, 1<<19, 20)
+	if n := contextPushes(paired, 400*time.Millisecond); n != 0 {
+		t.Fatalf("a not-yet-open mode window was pushed (%d)", n)
+	}
+	p := nextContext(t, paired, 1500*time.Millisecond)
+	if p.Navigation.Mode != "charge" {
+		t.Fatalf("deadline push: %+v", p.Navigation)
+	}
+	if late := time.Since(opens); late < 0 || late > 300*time.Millisecond {
+		t.Fatalf("deadline delivery off by %v", late)
+	}
+}
